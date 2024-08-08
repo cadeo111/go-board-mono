@@ -1,5 +1,7 @@
 use std::str;
+use std::sync::mpsc::channel;
 use std::time::Duration;
+
 use anyhow::{bail, Result};
 use embedded_svc::{
     http::{client::Client, Method},
@@ -10,10 +12,13 @@ use esp_idf_svc::{sys, wifi::{
     Configuration as WifiConfiguration,
 }};
 use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::delay::FreeRtos;
+use esp_idf_svc::hal::gpio::OutputPin;
+use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::prelude::*;
-
+use esp_idf_svc::hal::rmt::{RmtChannel, TxRmtDriver};
+use esp_idf_svc::hal::rmt::config::TransmitConfig;
 use esp_idf_svc::http::client::{
-    client,
     Configuration as HttpConfiguration,
     EspHttpConnection,
 };
@@ -24,7 +29,17 @@ use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use log::info;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
+use tokio::time;
 use tokio::time::sleep;
+
+use crate::neopixel::neo::{LedStrip, neopixel, neopixel2};
+use crate::neopixel::rgb::Rgb;
+
+
+mod neopixel;
+
+
 const WIFI_SSID: &'static str = env!("WIFI_SSID");
 const WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
 
@@ -33,6 +48,8 @@ const WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
 const TCP_LISTENING_PORT: u16 = 12345;
 
 esp_app_desc!();
+
+
 
 fn main() -> Result<()> {
     // It is necessary to call this function once. Otherwise, some patches to the runtime
@@ -58,12 +75,21 @@ fn main() -> Result<()> {
     let timer = EspTaskTimerService::new()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
+    info!("Initializing LED...");
+
+    let led = peripherals.pins.gpio3;
+    let channel0 = peripherals.rmt.channel0;
+
 
     info!("Initializing Wi-Fi...");
     let wifi = AsyncWifi::wrap(
         EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs))?,
         sysloop,
         timer.clone())?;
+
+    let (tx, mut rx) = mpsc::channel(32);
+
+    
 
     info!("Starting async run loop");
     tokio::runtime::Builder::new_current_thread()
@@ -74,14 +100,14 @@ fn main() -> Result<()> {
             wifi_loop.configure().await?;
             wifi_loop.initial_connect().await?;
 
+            info!("Preparing to launch led blinker...");
+            tokio::spawn(ctrl_led(led, channel0));
             info!("Preparing to launch echo server...");
             tokio::spawn(echo_server());
             info!("Preparing to launch requester...");
             tokio::spawn(requester());
             info!("Entering main Wi-Fi run loop...");
             wifi_loop.stay_connected().await
-            
-            
         })?;
     Ok(())
 }
@@ -198,6 +224,7 @@ fn get(url: impl AsRef<str>) -> Result<()> {
         _ => bail!("Unexpected response code: {}", status),
     }
 
+
     Ok(())
 }
 
@@ -205,10 +232,9 @@ fn get(url: impl AsRef<str>) -> Result<()> {
 async fn requester() -> Result<()> {
     loop {
         get("https://google.com")?;
-        sleep(Duration::from_millis(1000)).await;
+        sleep(Duration::from_millis(5000)).await;
     }
 }
-
 
 async fn echo_server() -> Result<()> {
     let addr = format!("0.0.0.0:{TCP_LISTENING_PORT}");
@@ -249,4 +275,65 @@ async fn serve_client(mut stream: TcpStream) -> Result<()> {
     }
 
     Ok(())
+}
+
+// async fn ctrl_led(led_pin: impl Peripheral<P=impl OutputPin>, channel: impl Peripheral<P: RmtChannel>) -> Result<()> {
+//     // let led = peripherals.pins.gpio2;
+//     // let channel = peripherals.rmt.channel0;
+//     
+//     
+//     
+//     
+//     
+//     let config = TransmitConfig::new().clock_divider(1);
+//     let mut tx = TxRmtDriver::new(channel, led_pin, &config)?;
+// 
+//     // 3 seconds white at 10% brightness
+//     neopixel2(Rgb::new(25, 25, 25), &mut tx, 1)?;
+//     time::sleep(Duration::from_millis(3000)).await;
+//     // infinite rainbow loop at 20% brightness
+//     let mut hue = 0;
+//     loop {
+//         let rgb = Rgb::from_hsv(hue, 100, 5)?;
+//         neopixel2(rgb, &mut tx, 16*16)?;
+// 
+//         hue += 1;
+//         if hue >= 360 {
+//             hue = 0;
+//         }
+//         time::sleep(Duration::from_millis(100)).await;
+//     }
+// }
+async fn ctrl_led(led_pin: impl Peripheral<P=impl OutputPin>, channel: impl Peripheral<P: RmtChannel>) -> Result<()> {
+    // let led = peripherals.pins.gpio2;
+    // let channel = peripherals.rmt.channel0;
+
+
+    let mut strip: LedStrip<{ 16 * 16 }> = LedStrip::new(led_pin, channel)?;
+    // let config = TransmitConfig::new().clock_divider(1);
+    // let mut tx = TxRmtDriver::new(channel, led_pin, &config)?;
+    strip.clear();
+    strip.refresh()?;
+    time::sleep(Duration::from_millis(100)).await;
+
+    // 3 seconds white at 10% brightness
+    strip.set_led(3, Rgb::new(25, 25, 25))?;
+    strip.refresh()?;
+    time::sleep(Duration::from_secs(3)).await;
+
+    // infinite rainbow loop at 20% brightness
+    let mut hue = 0;
+    loop {
+        let rgb = Rgb::from_hsv(hue, 100, 5)?;
+        strip.set_led(0, rgb)?;
+        strip.set_led(10, rgb)?;
+        strip.set_led(32, rgb)?;
+        strip.refresh()?;
+
+        hue += 1;
+        if hue >= 360 {
+            hue = 0;
+        }
+        time::sleep(Duration::from_millis(100)).await;
+    }
 }
