@@ -1,3 +1,3 @@
-pub mod neo;
+pub mod strip;
 pub mod rgb;
-pub mod led_strip;
+pub mod led_ctrl;

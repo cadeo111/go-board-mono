@@ -1,43 +1,42 @@
 use std::str;
-use std::sync::mpsc::channel;
-use std::time::Duration;
 
-use anyhow::{bail, Result};
-use embedded_svc::{
-    http::{client::Client, Method},
-    io::Read,
-};
-use esp_idf_svc::{sys, wifi::{
-    ClientConfiguration as WifiClientConfiguration,
-    Configuration as WifiConfiguration,
-}};
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Result;
+pub use embedded_svc::http::client::Client;
+pub use embedded_svc::http::Method;
+pub use embedded_svc::io::Read;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
-use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::hal::gpio::OutputPin;
-use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::prelude::*;
-use esp_idf_svc::hal::rmt::{RmtChannel, TxRmtDriver};
-use esp_idf_svc::hal::rmt::config::TransmitConfig;
-use esp_idf_svc::http::client::{
-    Configuration as HttpConfiguration,
-    EspHttpConnection,
-};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::sys::{esp, esp_app_desc, EspError};
+use esp_idf_svc::sys;
+use esp_idf_svc::sys::{esp, esp_app_desc};
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use log::info;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tokio::time;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
+use tokio::time::Duration;
+use tokio::time::Instant;
 use tokio::time::sleep;
+use tokio::time::timeout;
+use tokio::time::timeout_at;
 
-use crate::neopixel::neo::{LedStrip, neopixel, neopixel2};
+use crate::https::get;
+use crate::neopixel::led_ctrl::{led_ctrl, LedChange};
 use crate::neopixel::rgb::Rgb;
-
+use crate::wifi::WifiLoop;
 
 mod neopixel;
+mod wifi;
+mod https;
+mod encoder;
+
+const BOARD_SIZE: usize = 16;
+const CHANNEL_SIZE: usize = BOARD_SIZE * 2;
 
 
 const WIFI_SSID: &'static str = env!("WIFI_SSID");
@@ -87,25 +86,23 @@ fn main() -> Result<()> {
         sysloop,
         timer.clone())?;
 
-    let (tx, mut rx) = mpsc::channel(32);
-
-    
+    let (tx, rx) = mpsc::channel::<LedChange>(CHANNEL_SIZE);
 
     info!("Starting async run loop");
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
         .block_on(async move {
-            let mut wifi_loop = WifiLoop { wifi };
+            let mut wifi_loop = WifiLoop::new(wifi);
             wifi_loop.configure().await?;
             wifi_loop.initial_connect().await?;
 
             info!("Preparing to launch led blinker...");
-            tokio::spawn(ctrl_led(led, channel0));
+            tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }>(led, channel0, rx));
             info!("Preparing to launch echo server...");
-            tokio::spawn(echo_server());
+            tokio::spawn(echo_server(tx.clone()));
             info!("Preparing to launch requester...");
-            tokio::spawn(requester());
+            tokio::spawn(requester(tx.clone()));
             info!("Entering main Wi-Fi run loop...");
             wifi_loop.stay_connected().await
         })?;
@@ -113,130 +110,26 @@ fn main() -> Result<()> {
 }
 
 
-pub struct WifiLoop<'a> {
-    wifi: AsyncWifi<EspWifi<'a>>,
-}
-
-impl<'a> WifiLoop<'a> {
-    pub async fn configure(&mut self) -> Result<(), EspError> {
-        info!("Setting Wi-Fi credentials...");
-        self.wifi.set_configuration(&WifiConfiguration::Client(WifiClientConfiguration {
-            ssid: WIFI_SSID.parse().unwrap(),
-            password: WIFI_PASSWORD.parse().unwrap(),
-            ..Default::default()
-        }))?;
-
-        info!("Starting Wi-Fi driver...");
-        self.wifi.start().await
-    }
-
-    pub async fn initial_connect(&mut self) -> Result<(), EspError> {
-        self.do_connect_loop(true).await
-    }
-
-    pub async fn stay_connected(mut self) -> Result<(), EspError> {
-        self.do_connect_loop(false).await
-    }
-
-    async fn do_connect_loop(
-        &mut self,
-        exit_after_first_connect: bool,
-    ) -> Result<(), EspError> {
-        let wifi = &mut self.wifi;
-        loop {
-            // Wait for disconnect before trying to connect again.  This loop ensures
-            // we stay connected and is commonly missing from trivial examples as it's
-            // way too difficult to showcase the core logic of an example and have
-            // a proper Wi-Fi event loop without a robust async runtime.  Fortunately, we can do it
-            // now!
-            wifi.wifi_wait(|wifi| wifi.is_up(), None).await?;
-
-            info!("Connecting to Wi-Fi...");
-            wifi.connect().await?;
-
-            info!("Waiting for association...");
-            wifi.ip_wait_while(|wifi| wifi.is_up().map(|s| !s), None).await?;
-
-            if exit_after_first_connect {
-                return Ok(());
-            }
-        }
-    }
-}
-
-
-fn get(url: impl AsRef<str>) -> Result<()> {
-    // 1. Create a new EspHttpClient. (Check documentation)
-    // ANCHOR: connection
-    let connection = EspHttpConnection::new(&HttpConfiguration {
-        use_global_ca_store: true,
-        crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
-        ..Default::default()
-    })?;
-    // ANCHOR_END: connection
-    let mut client = Client::wrap(connection);
-
-    // 2. Open a GET request to `url`
-    let headers = [("accept", "text/plain")];
-    let request = client.request(Method::Get, url.as_ref(), &headers)?;
-    // 3. Submit write request and check the status code of the response.
-    // Successful http status codes are in the 200..=299 range.
-    let response = request.submit()?;
-    let status = response.status();
-    println!("Response code: {}\n", status);
-    match status {
-        200..=299 => {
-            // 4. if the status is OK, read response data chunk by chunk into a buffer and print it until done
-            //
-            // NB. see http_client.rs for an explanation of the offset mechanism for handling chunks that are
-            // split in the middle of valid UTF-8 sequences. This case is encountered a lot with the given
-            // example URL.
-            let mut buf = [0_u8; 256];
-            let mut offset = 0;
-            let mut total = 0;
-            let mut reader = response;
-            loop {
-                if let Ok(size) = Read::read(&mut reader, &mut buf[offset..]) {
-                    if size == 0 {
-                        break;
-                    }
-                    total += size;
-                    // 5. try converting the bytes into a Rust (UTF-8) string and print it
-                    let size_plus_offset = size + offset;
-                    match str::from_utf8(&buf[..size_plus_offset]) {
-                        Ok(text) => {
-                            print!("{}", text);
-                            offset = 0;
-                        }
-                        Err(error) => {
-                            let valid_up_to = error.valid_up_to();
-                            unsafe {
-                                print!("{}", str::from_utf8_unchecked(&buf[..valid_up_to]));
-                            }
-                            buf.copy_within(valid_up_to.., 0);
-                            offset = size_plus_offset - valid_up_to;
-                        }
-                    }
-                }
-            }
-            println!("Total: {} bytes", total);
-        }
-        _ => bail!("Unexpected response code: {}", status),
-    }
-
-
-    Ok(())
-}
-
-
-async fn requester() -> Result<()> {
+async fn requester(tx: Sender<LedChange>) -> Result<()> {
+    let mut t = true;
     loop {
         get("https://google.com")?;
+        tx.send(LedChange::new(0, 0,
+                               if t {
+                                   t = false;
+                                   Rgb::new(0, 0, 16)
+                               } else {
+                                   t = true;
+                                   Rgb::new(0, 16, 0)
+                               },
+        )).await?;
+
+
         sleep(Duration::from_millis(5000)).await;
     }
 }
 
-async fn echo_server() -> Result<()> {
+async fn echo_server(tx: Sender<LedChange>) -> Result<()> {
     let addr = format!("0.0.0.0:{TCP_LISTENING_PORT}");
 
     info!("Binding to {addr}...");
@@ -277,63 +170,3 @@ async fn serve_client(mut stream: TcpStream) -> Result<()> {
     Ok(())
 }
 
-// async fn ctrl_led(led_pin: impl Peripheral<P=impl OutputPin>, channel: impl Peripheral<P: RmtChannel>) -> Result<()> {
-//     // let led = peripherals.pins.gpio2;
-//     // let channel = peripherals.rmt.channel0;
-//     
-//     
-//     
-//     
-//     
-//     let config = TransmitConfig::new().clock_divider(1);
-//     let mut tx = TxRmtDriver::new(channel, led_pin, &config)?;
-// 
-//     // 3 seconds white at 10% brightness
-//     neopixel2(Rgb::new(25, 25, 25), &mut tx, 1)?;
-//     time::sleep(Duration::from_millis(3000)).await;
-//     // infinite rainbow loop at 20% brightness
-//     let mut hue = 0;
-//     loop {
-//         let rgb = Rgb::from_hsv(hue, 100, 5)?;
-//         neopixel2(rgb, &mut tx, 16*16)?;
-// 
-//         hue += 1;
-//         if hue >= 360 {
-//             hue = 0;
-//         }
-//         time::sleep(Duration::from_millis(100)).await;
-//     }
-// }
-async fn ctrl_led(led_pin: impl Peripheral<P=impl OutputPin>, channel: impl Peripheral<P: RmtChannel>) -> Result<()> {
-    // let led = peripherals.pins.gpio2;
-    // let channel = peripherals.rmt.channel0;
-
-
-    let mut strip: LedStrip<{ 16 * 16 }> = LedStrip::new(led_pin, channel)?;
-    // let config = TransmitConfig::new().clock_divider(1);
-    // let mut tx = TxRmtDriver::new(channel, led_pin, &config)?;
-    strip.clear();
-    strip.refresh()?;
-    time::sleep(Duration::from_millis(100)).await;
-
-    // 3 seconds white at 10% brightness
-    strip.set_led(3, Rgb::new(25, 25, 25))?;
-    strip.refresh()?;
-    time::sleep(Duration::from_secs(3)).await;
-
-    // infinite rainbow loop at 20% brightness
-    let mut hue = 0;
-    loop {
-        let rgb = Rgb::from_hsv(hue, 100, 5)?;
-        strip.set_led(0, rgb)?;
-        strip.set_led(10, rgb)?;
-        strip.set_led(32, rgb)?;
-        strip.refresh()?;
-
-        hue += 1;
-        if hue >= 360 {
-            hue = 0;
-        }
-        time::sleep(Duration::from_millis(100)).await;
-    }
-}
