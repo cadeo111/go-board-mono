@@ -1,4 +1,6 @@
+use std::num::NonZeroU32;
 use std::str;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -7,6 +9,9 @@ pub use embedded_svc::http::client::Client;
 pub use embedded_svc::http::Method;
 pub use embedded_svc::io::Read;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::gpio::InterruptType;
+use esp_idf_svc::hal::gpio::PinDriver;
+use esp_idf_svc::hal::gpio::Pull;
 use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
@@ -17,14 +22,15 @@ use log::info;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Notify;
 use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::time::timeout_at;
 
+use crate::encoder::RotaryEncoderState;
 use crate::https::get;
 use crate::neopixel::led_ctrl::{led_ctrl, LedChange};
 use crate::neopixel::rgb::Rgb;
@@ -51,6 +57,7 @@ esp_app_desc!();
 
 
 fn main() -> Result<()> {
+
     // It is necessary to call this function once. Otherwise, some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     sys::link_patches();
@@ -66,7 +73,8 @@ fn main() -> Result<()> {
         max_fds: 1,
         ..Default::default()
     };
-    (esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } })?;
+
+    { esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } } }?;
 
     info!("Setting up board...");
     let peripherals = Peripherals::take().unwrap();
@@ -74,11 +82,19 @@ fn main() -> Result<()> {
     let timer = EspTaskTimerService::new()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    info!("Initializing LED...");
-
-    let led = peripherals.pins.gpio3;
+    // GPIOS
+    let board_leds = peripherals.pins.gpio3;
     let channel0 = peripherals.rmt.channel0;
+    let rotary_encoder_btn_pin = peripherals.pins.gpio4;
+    let rotary_encoder_clk_pin = peripherals.pins.gpio5;
+    let rotary_encoder_dt_pin = peripherals.pins.gpio6;
 
+
+    info!("Initializing rotary encoder...");
+
+    let rotary_encoder = RotaryEncoderState::init(rotary_encoder_btn_pin.into(),
+                                                  rotary_encoder_clk_pin.into(),
+                                                  rotary_encoder_dt_pin.into())?;
 
     info!("Initializing Wi-Fi...");
     let wifi = AsyncWifi::wrap(
@@ -96,13 +112,17 @@ fn main() -> Result<()> {
             let mut wifi_loop = WifiLoop::new(wifi);
             wifi_loop.configure().await?;
             wifi_loop.initial_connect().await?;
-
+            info!("Preparing to launch rotary encoder monitor 1...");
+            tokio::spawn(async {
+                let mut rotary_encoder = rotary_encoder;
+                rotary_encoder.monitor_encoder_spin().await
+            });
             info!("Preparing to launch led blinker...");
-            tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }>(led, channel0, rx));
+            tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }>(board_leds, channel0, rx));
             info!("Preparing to launch echo server...");
             tokio::spawn(echo_server(tx.clone()));
-            info!("Preparing to launch requester...");
-            tokio::spawn(requester(tx.clone()));
+            // info!("Preparing to launch requester...");
+            // tokio::spawn(requester(tx.clone()));
             info!("Entering main Wi-Fi run loop...");
             wifi_loop.stay_connected().await
         })?;
