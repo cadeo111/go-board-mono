@@ -1,16 +1,12 @@
 use std::time::Duration;
 
+use super::led_ctrl::LedChange;
+use super::rgb::Rgb;
 use anyhow::{anyhow, Result};
 use esp_idf_svc::hal::gpio::OutputPin;
 use esp_idf_svc::hal::peripheral::Peripheral;
-use esp_idf_svc::hal::rmt::{PinState, Pulse, RmtChannel, TxRmtDriver, VariableLengthSignal};
 use esp_idf_svc::hal::rmt::config::TransmitConfig;
-use crate::neopixel::led_ctrl::LedChange;
-use crate::neopixel::rgb::Rgb;
-
-
-
-
+use esp_idf_svc::hal::rmt::{PinState, Pulse, RmtChannel, TxRmtDriver, VariableLengthSignal};
 
 pub struct LedStrip<'tx, const SIZE: usize> {
     config: TransmitConfig,
@@ -19,10 +15,17 @@ pub struct LedStrip<'tx, const SIZE: usize> {
 }
 
 impl<'tx, const SIZE: usize> LedStrip<'tx, SIZE> {
-    pub fn new(led_pin: impl Peripheral<P=impl OutputPin> + 'tx, channel: impl Peripheral<P: RmtChannel> + 'tx) -> Result<Self> {
+    pub fn new(
+        led_pin: impl Peripheral<P = impl OutputPin> + 'tx,
+        channel: impl Peripheral<P: RmtChannel> + 'tx,
+    ) -> Result<Self> {
         let config: TransmitConfig = TransmitConfig::new().clock_divider(1);
         let tx: TxRmtDriver = TxRmtDriver::new(channel, led_pin, &config)?;
-        Ok(LedStrip { config, tx, data: [Rgb::new(0, 0, 0); SIZE] })
+        Ok(LedStrip {
+            config,
+            tx,
+            data: [Rgb::new(0, 0, 0); SIZE],
+        })
     }
 
     pub fn clear(&mut self) {
@@ -34,7 +37,11 @@ impl<'tx, const SIZE: usize> LedStrip<'tx, SIZE> {
         let LedChange { x, y, color } = *change;
         let x: usize = x.into();
         let y: usize = y.into();
-        let index = if x % 2 == 0 { x * size + y } else { (x + 1) * size - y - 1 };
+        let index = if x % 2 == 0 {
+            x * size + y
+        } else {
+            (x + 1) * size - y - 1
+        };
         self.set_led(index, color)
     }
 
@@ -57,7 +64,6 @@ impl<'tx, const SIZE: usize> LedStrip<'tx, SIZE> {
             Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(600))?,
         );
 
-
         let zero = Pulse::zero();
         let mut s: [[&Pulse; 2]; 24] = [[&zero, &zero]; 24];
         let mut signal = VariableLengthSignal::new();
@@ -77,11 +83,3 @@ impl<'tx, const SIZE: usize> LedStrip<'tx, SIZE> {
         Ok(())
     }
 }
-
-
-
-
-
-
-
-

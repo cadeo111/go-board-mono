@@ -8,3 +8,24 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
 # Workaround for https://github.com/espressif/esp-idf/issues/7631
 #CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=n
 #CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=n
+
+# PARTITION TABLE
+CONFIG_PARTITION_TABLE_CUSTOM=y
+# file is reach from: go_board_firmware_std/target/riscv32imc-esp-espidf/debug/build/esp-idf-sys-aba3b4de81a4f4e8/out/
+# so have to go up directory a bunch, this works for debug, idk about prod
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../../../../partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="../../../../../../partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+CONFIG_PARTITION_TABLE_MD5=y
+
+
+
+#FLASH SIZE SET TO 4MB
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# CONFIG_ESPTOOLPY_FLASHSIZE_8MB is not set
+# CONFIG_ESPTOOLPY_FLASHSIZE_16MB is not set
+# CONFIG_ESPTOOLPY_FLASHSIZE_32MB is not set
+# CONFIG_ESPTOOLPY_FLASHSIZE_64MB is not set
+# CONFIG_ESPTOOLPY_FLASHSIZE_128MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_FLASHSIZE_DETECT=y

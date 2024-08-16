@@ -7,10 +7,10 @@ use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::rmt::RmtChannel;
 use tokio::sync::mpsc::Receiver;
 use tokio::time;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
-use crate::neopixel::rgb::Rgb;
-use crate::neopixel::strip::LedStrip;
+use super::rgb::Rgb;
+use super::strip::LedStrip;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 pub struct LedChange {
@@ -25,12 +25,13 @@ impl LedChange {
     }
 }
 
-
-pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(led_pin: impl Peripheral<P=impl OutputPin>, channel: impl Peripheral<P: RmtChannel>, mut rx: Receiver<LedChange>) -> anyhow::Result<()> {
+pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(
+    led_pin: impl Peripheral<P = impl OutputPin>,
+    channel: impl Peripheral<P: RmtChannel>,
+    mut rx: Receiver<LedChange>,
+) -> anyhow::Result<()> {
     // let led = peripherals.pins.gpio2;
     // let channel = peripherals.rmt.channel0;
-
-
 
     let mut strip: LedStrip<LED_STRIP_SIZE> = LedStrip::new(led_pin, channel)?;
     // let config = TransmitConfig::new().clock_divider(1);
@@ -47,13 +48,10 @@ pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(led_pin: impl Peripheral<P=im
     // if 1 second has elapse cancel waiting and
     let mut stop_at = Instant::now().add(Duration::from_secs(1));
     let mut dirty = false;
-    ;
     loop {
         if let Ok(change_opt) = timeout_at(stop_at, rx.recv()).await {
             match change_opt {
-                None => {
-                    return Err(anyhow!("Led Channel closed unexpectedly!"))
-                }
+                None => return Err(anyhow!("Led Channel closed unexpectedly!")),
                 Some(change) => {
                     println!("{:?} ---> Got Change! ", Instant::now());
                     strip.set_led_change(&change, LED_STRIP_SIZE)?;

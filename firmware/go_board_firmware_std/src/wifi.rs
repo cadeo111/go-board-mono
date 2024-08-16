@@ -1,9 +1,9 @@
-use esp_idf_svc::{sys, wifi::{
-    ClientConfiguration as WifiClientConfiguration,
-    Configuration as WifiConfiguration,
-}};
 use esp_idf_svc::sys::EspError;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
+use esp_idf_svc::{
+    sys,
+    wifi::{ClientConfiguration as WifiClientConfiguration, Configuration as WifiConfiguration},
+};
 use log::info;
 
 use crate::{WIFI_PASSWORD, WIFI_SSID};
@@ -19,11 +19,12 @@ impl<'a> WifiLoop<'a> {
 
     pub async fn configure(&mut self) -> anyhow::Result<(), EspError> {
         info!("Setting Wi-Fi credentials...");
-        self.wifi.set_configuration(&WifiConfiguration::Client(WifiClientConfiguration {
-            ssid: WIFI_SSID.parse().unwrap(),
-            password: WIFI_PASSWORD.parse().unwrap(),
-            ..Default::default()
-        }))?;
+        self.wifi
+            .set_configuration(&WifiConfiguration::Client(WifiClientConfiguration {
+                ssid: WIFI_SSID.parse().unwrap(),
+                password: WIFI_PASSWORD.parse().unwrap(),
+                ..Default::default()
+            }))?;
 
         info!("Starting Wi-Fi driver...");
         self.wifi.start().await
@@ -54,7 +55,8 @@ impl<'a> WifiLoop<'a> {
             wifi.connect().await?;
 
             info!("Waiting for association...");
-            wifi.ip_wait_while(|wifi| wifi.is_up().map(|s| !s), None).await?;
+            wifi.ip_wait_while(|wifi| wifi.is_up().map(|s| !s), None)
+                .await?;
 
             if exit_after_first_connect {
                 return Ok(());

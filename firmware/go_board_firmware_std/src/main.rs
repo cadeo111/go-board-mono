@@ -24,26 +24,25 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Notify;
-use tokio::time::Duration;
-use tokio::time::Instant;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::time::timeout_at;
+use tokio::time::Duration;
+use tokio::time::Instant;
 
 use crate::encoder::RotaryEncoderState;
-use crate::https::get;
 use crate::neopixel::led_ctrl::{led_ctrl, LedChange};
 use crate::neopixel::rgb::Rgb;
+use crate::onlinego::api::test_connection;
 use crate::wifi::WifiLoop;
 
-mod neopixel;
-mod wifi;
-mod https;
 mod encoder;
+mod neopixel;
+mod onlinego;
+mod wifi;
 
 const BOARD_SIZE: usize = 16;
 const CHANNEL_SIZE: usize = BOARD_SIZE * 2;
-
 
 const WIFI_SSID: &'static str = env!("WIFI_SSID");
 const WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
@@ -54,17 +53,13 @@ const TCP_LISTENING_PORT: u16 = 12345;
 
 esp_app_desc!();
 
-
-
 fn main() -> Result<()> {
-
     // It is necessary to call this function once. Otherwise, some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     sys::link_patches();
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
-
 
     // eventfd is needed by our mio poll implementation.  Note you should set max_fds
     // higher if you have other code that may need eventfd.
@@ -74,7 +69,9 @@ fn main() -> Result<()> {
         ..Default::default()
     };
 
-    { esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } } }?;
+    {
+        esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } }
+    }?;
 
     info!("Setting up board...");
     let peripherals = Peripherals::take().unwrap();
@@ -89,18 +86,20 @@ fn main() -> Result<()> {
     let rotary_encoder_clk_pin = peripherals.pins.gpio5;
     let rotary_encoder_dt_pin = peripherals.pins.gpio6;
 
-
     info!("Initializing rotary encoder...");
 
-    let rotary_encoder = RotaryEncoderState::init(rotary_encoder_btn_pin.into(),
-                                                  rotary_encoder_clk_pin.into(),
-                                                  rotary_encoder_dt_pin.into())?;
+    let rotary_encoder = RotaryEncoderState::init(
+        rotary_encoder_btn_pin.into(),
+        rotary_encoder_clk_pin.into(),
+        rotary_encoder_dt_pin.into(),
+    )?;
 
     info!("Initializing Wi-Fi...");
     let wifi = AsyncWifi::wrap(
         EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs))?,
         sysloop,
-        timer.clone())?;
+        timer.clone(),
+    )?;
 
     let (tx, rx) = mpsc::channel::<LedChange>(CHANNEL_SIZE);
 
@@ -112,38 +111,41 @@ fn main() -> Result<()> {
             let mut wifi_loop = WifiLoop::new(wifi);
             wifi_loop.configure().await?;
             wifi_loop.initial_connect().await?;
-            info!("Preparing to launch rotary encoder monitor 1...");
+            info!("Preparing to launch rotary encoder monitor...");
             tokio::spawn(async {
                 let mut rotary_encoder = rotary_encoder;
                 rotary_encoder.monitor_encoder_spin().await
             });
             info!("Preparing to launch led blinker...");
-            tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }>(board_leds, channel0, rx));
-            info!("Preparing to launch echo server...");
-            tokio::spawn(echo_server(tx.clone()));
-            // info!("Preparing to launch requester...");
-            // tokio::spawn(requester(tx.clone()));
+            tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }>(
+                board_leds, channel0, rx,
+            ));
+            // info!("Preparing to launch echo server...");
+            // tokio::spawn(echo_server(tx.clone()));
+            info!("Preparing to launch requester...");
+            tokio::spawn(requester(tx.clone()));
             info!("Entering main Wi-Fi run loop...");
             wifi_loop.stay_connected().await
         })?;
     Ok(())
 }
 
-
-async fn requester(tx: Sender<LedChange>) -> Result<()> {
+async fn requester(tx: Sender<LedChange>) {
     let mut t = true;
     loop {
-        get("https://google.com")?;
-        tx.send(LedChange::new(0, 0,
-                               if t {
-                                   t = false;
-                                   Rgb::new(0, 0, 16)
-                               } else {
-                                   t = true;
-                                   Rgb::new(0, 16, 0)
-                               },
-        )).await?;
-
+        // get("https://google.com")?;
+        if let Err(e) = test_connection() {
+            eprintln!("Connection error: {e}");
+        };
+        // tx.send(LedChange::new(0, 0,
+        //                        if t {
+        //                            t = false;
+        //                            Rgb::new(0, 0, 16)
+        //                        } else {
+        //                            t = true;
+        //                            Rgb::new(0, 16, 0)
+        //                        },
+        // )).await?;
 
         sleep(Duration::from_millis(5000)).await;
     }
@@ -189,4 +191,3 @@ async fn serve_client(mut stream: TcpStream) -> Result<()> {
 
     Ok(())
 }
-

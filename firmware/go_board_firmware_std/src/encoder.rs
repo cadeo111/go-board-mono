@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use anyhow::Result;
-use esp_idf_svc::hal::gpio::{AnyInputPin, AnyIOPin, Input, InterruptType, Level, PinDriver, Pull};
+use esp_idf_svc::hal::gpio::{AnyIOPin, AnyInputPin, Input, InterruptType, Level, PinDriver, Pull};
 use tokio::sync::Notify;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -14,12 +14,8 @@ enum SpinDirection {
 impl Display for SpinDirection {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SpinDirection::CounterClockwise => {
-                f.write_str("(SD:Counter Clockwise)")
-            }
-            SpinDirection::Clockwise => {
-                f.write_str("(SD:Clockwise)")
-            }
+            SpinDirection::CounterClockwise => f.write_str("(SD:Counter Clockwise)"),
+            SpinDirection::Clockwise => f.write_str("(SD:Clockwise)"),
         }
     }
 }
@@ -33,7 +29,11 @@ pub struct RotaryEncoderState<'a> {
 }
 
 impl<'a> RotaryEncoderState<'a> {
-    pub fn init(rotary_encoder_btn_pin: AnyIOPin, rotary_encoder_clk_pin: AnyInputPin, rotary_encoder_dt_pin: AnyInputPin) -> Result<Self> {
+    pub fn init(
+        rotary_encoder_btn_pin: AnyIOPin,
+        rotary_encoder_clk_pin: AnyInputPin,
+        rotary_encoder_dt_pin: AnyInputPin,
+    ) -> Result<Self> {
         let (button_notify, button) = {
             let mut button = PinDriver::input(rotary_encoder_btn_pin)?;
             button.set_pull(Pull::Up)?;
@@ -49,13 +49,11 @@ impl<'a> RotaryEncoderState<'a> {
             (notify, button)
         };
 
-
         let (clk, clk_notify, dt) = {
             let mut clk = PinDriver::input(rotary_encoder_clk_pin)?;
             clk.set_interrupt_type(InterruptType::PosEdge)?;
 
             let dt = PinDriver::input(rotary_encoder_dt_pin)?;
-
 
             let clk_notify = Arc::new(Notify::new());
             let notifier = clk_notify.clone();
@@ -67,10 +65,16 @@ impl<'a> RotaryEncoderState<'a> {
             (clk, clk_notify, dt)
         };
 
-        Ok(Self { clk, clk_notify, dt, button_notify, button })
+        Ok(Self {
+            clk,
+            clk_notify,
+            dt,
+            button_notify,
+            button,
+        })
     }
 
-    pub async fn monitor_encoder_spin(&mut self, ) -> Result<()> {
+    pub async fn monitor_encoder_spin(&mut self) -> Result<()> {
         let mut current_direction;
         let mut counter = 0;
 
@@ -85,7 +89,7 @@ impl<'a> RotaryEncoderState<'a> {
                 counter -= 1;
             }
             println!("counter: {}, direction: {}", counter, current_direction)
-        };
+        }
         Ok(())
     }
 }
