@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use anyhow::bail;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -5,6 +6,13 @@ pub struct Rgb {
     r: u8,
     g: u8,
     b: u8,
+}
+
+impl Display for Rgb {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Rgb{r,g, b} = self;
+        write!(f, "({r}, {g}, {b})")
+    }
 }
 
 impl Rgb {

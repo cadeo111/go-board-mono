@@ -2,6 +2,11 @@ use std::num::NonZeroU32;
 use std::str;
 use std::sync::Arc;
 
+use crate::encoder::RotaryEncoderState;
+use crate::neopixel::led_ctrl::{led_ctrl, LedChange};
+use crate::neopixel::rgb::Rgb;
+use crate::onlinego::api::test_connection;
+use crate::wifi::WifiLoop;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
@@ -24,17 +29,13 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Notify;
+use tokio::task::JoinError;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::time::timeout_at;
 use tokio::time::Duration;
 use tokio::time::Instant;
-
-use crate::encoder::RotaryEncoderState;
-use crate::neopixel::led_ctrl::{led_ctrl, LedChange};
-use crate::neopixel::rgb::Rgb;
-use crate::onlinego::api::test_connection;
-use crate::wifi::WifiLoop;
+use tokio::{join, select};
 
 mod encoder;
 mod neopixel;
@@ -112,43 +113,62 @@ fn main() -> Result<()> {
             wifi_loop.configure().await?;
             wifi_loop.initial_connect().await?;
             info!("Preparing to launch rotary encoder monitor...");
-            tokio::spawn(async {
+            let mut rc = tokio::spawn(async {
                 let mut rotary_encoder = rotary_encoder;
                 rotary_encoder.monitor_encoder_spin().await
             });
             info!("Preparing to launch led blinker...");
-            tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }>(
+            let mut led = tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }, { BOARD_SIZE }>(
                 board_leds, channel0, rx,
             ));
             // info!("Preparing to launch echo server...");
             // tokio::spawn(echo_server(tx.clone()));
             info!("Preparing to launch requester...");
-            tokio::spawn(requester(tx.clone()));
+            let mut rq = tokio::spawn(requester(tx.clone()));
             info!("Entering main Wi-Fi run loop...");
-            wifi_loop.stay_connected().await
+            let mut wifi = tokio::spawn(wifi_loop.stay_connected());
+            return select! {
+                result = &mut rc =>{
+                    info!("Rotation Control exited");
+                    result?
+                }
+               result = &mut led => {
+                      info!("LED exited");
+                    result?
+                }
+                result = &mut rq => {
+                      info!("Requester exited");
+                    result?
+                }
+                result = &mut wifi =>{
+                      info!("Wifi exited");
+                    let r:Result<()> = result?.map_err(|e| anyhow!(e));
+                    r
+                }
+            };
         })?;
     Ok(())
 }
 
-async fn requester(tx: Sender<LedChange>) {
+async fn requester(tx: Sender<LedChange>) -> Result<()> {
     let mut t = true;
-    loop {
-        // get("https://google.com")?;
-        if let Err(e) = test_connection() {
-            eprintln!("Connection error: {e}");
-        };
-        // tx.send(LedChange::new(0, 0,
-        //                        if t {
-        //                            t = false;
-        //                            Rgb::new(0, 0, 16)
-        //                        } else {
-        //                            t = true;
-        //                            Rgb::new(0, 16, 0)
-        //                        },
-        // )).await?;
+    // loop {
+    // get("https://google.com")?;
 
-        sleep(Duration::from_millis(5000)).await;
+    let bs = test_connection()?;
+
+    neopixel::go_board::show_board(&tx, &bs.board, bs.height(), bs.width()).await?;
+
+    //     sleep(Duration::from_millis(5000)).await;
+    // }
+    loop {
+        tx.send(LedChange::new(0, 0, Rgb::new(0, 0, 50))).await?;
+        sleep(Duration::from_millis(1000)).await;
+        tx.send(LedChange::new(0, 0, Rgb::new(0, 0, 0))).await?;
+        sleep(Duration::from_millis(1000)).await;
+        info!("looping reqs");
     }
+    Ok(())
 }
 
 async fn echo_server(tx: Sender<LedChange>) -> Result<()> {

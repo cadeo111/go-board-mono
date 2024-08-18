@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::ops::Add;
 use std::time::Duration;
 
@@ -19,13 +20,20 @@ pub struct LedChange {
     pub color: Rgb,
 }
 
+impl Display for LedChange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let LedChange{x,y, color} = self;
+        write!(f, "({x},{y},{color})")
+    }
+}
+
 impl LedChange {
     pub fn new(x: u8, y: u8, color: Rgb) -> Self {
         Self { x, y, color }
     }
 }
 
-pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(
+pub async fn led_ctrl<const LED_STRIP_SIZE: usize, const LED_STRIP_SQUARE_SIDE: usize>(
     led_pin: impl Peripheral<P = impl OutputPin>,
     channel: impl Peripheral<P: RmtChannel>,
     mut rx: Receiver<LedChange>,
@@ -43,9 +51,10 @@ pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(
     // 3 seconds white at 10% brightness
     strip.set_led(26, Rgb::new(25, 25, 25))?;
     strip.refresh()?;
-    time::sleep(Duration::from_secs(3)).await;
+    time::sleep(Duration::from_secs(10)).await;
     // have a loop where we receive updates
     // if 1 second has elapse cancel waiting and
+    let start  =Instant::now();
     let mut stop_at = Instant::now().add(Duration::from_secs(1));
     let mut dirty = false;
     loop {
@@ -53,8 +62,8 @@ pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(
             match change_opt {
                 None => return Err(anyhow!("Led Channel closed unexpectedly!")),
                 Some(change) => {
-                    println!("{:?} ---> Got Change! ", Instant::now());
-                    strip.set_led_change(&change, LED_STRIP_SIZE)?;
+                    println!("{:?} ---> Got Change! {change}", start.elapsed());
+                    strip.set_led_change(&change, LED_STRIP_SQUARE_SIDE)?;
                     if !dirty {
                         dirty = true;
                     }
@@ -62,7 +71,7 @@ pub async fn led_ctrl<const LED_STRIP_SIZE: usize>(
             }
         } else {
             if dirty {
-                println!("{:?} ---> Refreshing!", Instant::now());
+                println!("{:?} ---> Refreshing!", start.elapsed());
                 dirty = false;
                 // reset timer, aim for every 1 seconds
                 strip.refresh()?

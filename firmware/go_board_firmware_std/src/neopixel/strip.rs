@@ -7,6 +7,7 @@ use esp_idf_svc::hal::gpio::OutputPin;
 use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::rmt::config::TransmitConfig;
 use esp_idf_svc::hal::rmt::{PinState, Pulse, RmtChannel, TxRmtDriver, VariableLengthSignal};
+use log::debug;
 
 pub struct LedStrip<'tx, const SIZE: usize> {
     config: TransmitConfig,
@@ -42,12 +43,13 @@ impl<'tx, const SIZE: usize> LedStrip<'tx, SIZE> {
         } else {
             (x + 1) * size - y - 1
         };
+        println!("({x},{y}) -> {index}");
         self.set_led(index, color)
     }
 
     pub fn set_led(&mut self, index: usize, rgb: Rgb) -> Result<()> {
         if index >= SIZE {
-            return Err(anyhow!("index out of range of led strip!"));
+            return Err(anyhow!("index: {index} out of range of led strip!"));
         }
         self.data[index] = rgb;
 

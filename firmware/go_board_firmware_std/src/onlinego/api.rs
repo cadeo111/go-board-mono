@@ -4,6 +4,7 @@ use super::status_codes::StatusCode;
 use anyhow::{anyhow, Result};
 use esp_idf_svc::sys::const_format::formatcp;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Display;
 
 const ONLINE_GO_CLIENT_ID: &'static str = env!("ONLINE_GO_CLIENT_ID");
@@ -18,8 +19,8 @@ const OAUTH_URL: &str = formatcp!("{}/oauth2/", BASE_URL);
 /// PASSWORD AUTH
 #[derive(Serialize, Deserialize, Debug)]
 struct OauthResponseError {
-    error: String, // will be empty string if all went well
-    error_description: String,
+    pub error: String, // will be empty string if all went well
+    pub error_description: String,
 }
 impl OauthResponseError {
     fn to_anyhow(&self, status: StatusCode) -> anyhow::Error {
@@ -33,10 +34,10 @@ impl OauthResponseError {
 
 #[derive(Deserialize, Debug)]
 struct OauthResponseValid {
-    access_token: AuthToken,
-    expires_in: i32,
-    token_type: String,
-    refresh_token: String,
+    pub access_token: AuthToken,
+    pub expires_in: i32,
+    pub token_type: String,
+    pub refresh_token: String,
     // raw_scope: String, // must still be parsed, not necessary at the moment
 }
 
@@ -136,12 +137,128 @@ pub fn get_current_player(auth_token: &AuthToken) -> Result<Player> {
 
 /// END PLAYER
 
-pub fn test_connection() -> Result<()> {
+/// START GAME
+#[derive(Serialize, Deserialize, Debug)]
+struct GameList {
+    #[serde(rename = "results")]
+    games: Vec<GameListData>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GameListData {
+    pub id: i64,
+    pub name: String,
+    pub width: i32,
+    pub height: i32,
+    pub players: HashMap<String, Player>,
+    pub black_lost: bool,
+    pub white_lost: bool,
+}
+
+impl GameListData {
+    // Description returns a formatted description of the game.
+    fn description(&self) -> String {
+        let ended = if self.game_over() { " (ended)" } else { "" };
+        format!(
+            "{} (B) vs {} (W) ({}x{}){}",
+            self.players["black"], self.players["white"], self.width, self.height, ended
+        )
+    }
+
+    // GameOver returns true if the game has ended, otherwise false.
+    fn game_over(&self) -> bool {
+        // If a game is over, one of these will be false
+        !self.black_lost || !self.white_lost
+    }
+}
+
+pub fn get_current_player_games(auth_token: &AuthToken) -> Result<GameList> {
+    const CURRENT_GAMES_URL: &str = formatcp!("{}me/games?ended__isnull=true", API_URL);
+
+    let (status_code, value) = request(RequestType::AuthorizedGet {
+        url: CURRENT_GAMES_URL,
+        auth_token,
+    })?;
+    if status_code.is_success() {
+        serde_json::from_str::<GameList>(&value).map_err(|e| {
+            anyhow!(e).context(format!(
+                "Failed to get current players games! ({status_code}"
+            ))
+        })
+    } else {
+        Err(anyhow!(
+            "Failed to get current players games! ({status_code})"
+        ))
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BoardState {
+    pub move_number: i32,
+    pub player_to_move: i64,
+    pub phase: String,
+    pub board: Vec<Vec<i32>>,
+    pub outcome: String,
+    pub removal: Vec<Vec<i32>>,
+    pub last_move: LastMove,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct LastMove {
+    x: i32,
+    y: i32,
+}
+
+impl BoardState {
+   pub fn finished(&self) -> bool {
+        self.phase == "finished"
+    }
+
+   pub fn height(&self) -> usize {
+        self.board.len()
+    }
+
+   pub fn width(&self) -> usize {
+        if self.height() == 0 {
+            0
+        } else {
+            self.board[0].len()
+        }
+    }
+}
+
+fn get_game_data(game_id: i64, auth_token: &AuthToken) -> Result<BoardState> {
+    let url = format!("{TERMINATION_API_URL}game/{game_id}/state");
+
+    let (status_code, value) = request(RequestType::AuthorizedGet { url, auth_token })?;
+
+    if status_code.is_success() {
+        print!("\n\n{value}\n\n");
+        serde_json::from_str::<BoardState>(&value).map_err(|e| {
+            anyhow!(e).context(format!(
+                "Failed to get game data for {game_id}! ({status_code}"
+            ))
+        })
+    } else {
+        Err(anyhow!(
+            "Failed to get game data for {game_id}! ({status_code})"
+        ))
+    }
+}
+
+/// END GAME
+
+pub fn test_connection() -> Result<BoardState> {
     // let url = Url::parse_with_params("https://httpbun.org/post",
     //                                  &[("lang", "rust"), ("browser", "servo")])?;//"
 
-    let s = auth_with_password(ONLINE_GO_CLIENT_ID, ONLINE_GO_USERNAME, ONLINE_GO_PASSWORD)?;
-    println!("{s:?}");
+    let oauth = auth_with_password(ONLINE_GO_CLIENT_ID, ONLINE_GO_USERNAME, ONLINE_GO_PASSWORD)?;
+    let games = get_current_player_games(&oauth.access_token)?;
+    let game_data = get_game_data(games.games[0].id, &oauth.access_token)?;
+    println!("{game_data:?}");
+    Ok(game_data)
+    // let player = get_current_player(&s.access_token)?;
+    // println!("{player}");
 
-    Ok(())
+    // Ok(())
 }

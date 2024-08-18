@@ -4,9 +4,7 @@ use anyhow::{anyhow, Result};
 use embedded_svc::http::client::Client;
 use embedded_svc::http::{Headers, Method};
 use embedded_svc::io::Read;
-use esp_idf_svc::http::client::{
-    Configuration as HttpConfiguration, EspHttpConnection,
-};
+use esp_idf_svc::http::client::{Configuration as HttpConfiguration, EspHttpConnection};
 use esp_idf_svc::io::Write;
 use std::str;
 
@@ -32,12 +30,10 @@ where
     },
 }
 
-pub fn request(
-    request_type: RequestType<impl AsRef<str>>,
-) -> Result<(StatusCode, String)> {
-    const FORM_HEADER: (&str, &str) =
+pub fn request(request_type: RequestType<impl AsRef<str>>) -> Result<(StatusCode, String)> {
+    const POST_CONTENT_URL_ENCODED: (&str, &str) =
         ("Content-Type", "application/x-www-form-urlencoded");
-    const ACCEPT_HEADER: (&str, &str) = ("accept", "text/plain");
+    // const ACCEPT_CONTENT_HEADER_JSON: (&str, &str) = ("Accept", "application/json");
 
     // 1. Create a new EspHttpClient.
     let connection = EspHttpConnection::new(&HttpConfiguration {
@@ -50,31 +46,24 @@ pub fn request(
 
     // 2. Open a request to `url`
     let url_ref;
+    let headers_1;
     let headers_2;
-    let headers_3;
 
     let request = {
         match request_type {
             RequestType::Get { url } => {
                 url_ref = url;
-                client.request(
-                    Method::Get,
-                    url_ref.as_ref(),
-                    &[ACCEPT_HEADER],
-                )?
+                client.request(Method::Get, url_ref.as_ref(), &[])?
             }
             RequestType::AuthorizedGet { url, auth_token } => {
                 url_ref = url;
-                headers_2 = [ACCEPT_HEADER, auth_token.auth_header()];
-                client.request(Method::Get, url_ref.as_ref(), &headers_2)?
+                headers_1 = [auth_token.auth_header()];
+                client.request(Method::Get, url_ref.as_ref(), &headers_1)?
             }
             RequestType::Post { url, data } => {
                 url_ref = url;
-                let mut request = client.request(
-                    Method::Get,
-                    url_ref.as_ref(),
-                    &[ACCEPT_HEADER, FORM_HEADER],
-                )?;
+                let mut request =
+                    client.request(Method::Post, url_ref.as_ref(), &[POST_CONTENT_URL_ENCODED])?;
                 write!(request, "{}", data.as_ref())?;
                 request
             }
@@ -84,13 +73,8 @@ pub fn request(
                 data,
             } => {
                 url_ref = url;
-                headers_3 =
-                    [ACCEPT_HEADER, FORM_HEADER, auth_token.auth_header()];
-                let mut request = client.request(
-                    Method::Get,
-                    url_ref.as_ref(),
-                    &headers_3,
-                )?;
+                headers_2 = [POST_CONTENT_URL_ENCODED, auth_token.auth_header()];
+                let mut request = client.request(Method::Post, url_ref.as_ref(), &headers_2)?;
                 write!(request, "{}", data.as_ref())?;
                 request
             }
@@ -135,16 +119,11 @@ pub fn request(
                 Err(error) => {
                     let valid_up_to = error.valid_up_to();
                     unsafe {
-                        print!(
-                            "{}",
-                            str::from_utf8_unchecked(&buf[..valid_up_to])
-                        );
+                        print!("{}", str::from_utf8_unchecked(&buf[..valid_up_to]));
                     }
                     buf.copy_within(valid_up_to.., 0);
                     offset = size_plus_offset - valid_up_to;
-                    return Err(
-                        anyhow!(error).context("Failed to parse response")
-                    );
+                    return Err(anyhow!(error).context("Failed to parse response"));
                 }
             }
         }
