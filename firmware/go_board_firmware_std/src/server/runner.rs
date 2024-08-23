@@ -1,3 +1,4 @@
+use crate::onlinego::https::{request as outside_request, RequestType};
 use crate::server::captive_portal::CaptivePortal;
 use crate::server::dns::SimpleDns;
 use esp_idf_svc::{
@@ -13,7 +14,7 @@ use esp_idf_svc::{
     netif::{EspNetif, NetifConfiguration, NetifStack},
     nvs::EspDefaultNvsPartition,
     sys::{self, EspError},
-    wifi::{self, AccessPointConfiguration, EspWifi, WifiDriver},
+    wifi::{self, AccessPointConfiguration, ClientConfiguration, EspWifi, WifiDriver},
 };
 use std::{
     net::Ipv4Addr,
@@ -22,10 +23,16 @@ use std::{
     time::Duration,
 };
 
+use crate::{WIFI_PASSWORD, WIFI_SSID};
 use anyhow::{anyhow, Result};
+use axum::response;
+use embedded_svc::ipv4::ClientConfiguration as ipv4ClientConfiguration;
+use esp_idf_svc::wifi::BlockingWifi;
+use log::info;
+
 pub const IP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 42, 1);
 
-pub fn run() -> Result<(), EspError> {
+pub fn run() -> Result<()> {
     unsafe {
         sys::nvs_flash_init();
     }
@@ -35,7 +42,7 @@ pub fn run() -> Result<(), EspError> {
     let event_loop = EspSystemEventLoop::take()?;
     let peripherals = Peripherals::take()?;
 
-    log::info!("Starting Wi-Fi...");
+    info!("Starting Wi-Fi...");
     let wifi_driver = WifiDriver::new(
         peripherals.modem,
         event_loop.clone(),
@@ -44,6 +51,13 @@ pub fn run() -> Result<(), EspError> {
     let mut wifi = EspWifi::wrap_all(
         wifi_driver,
         EspNetif::new(NetifStack::Sta)?,
+        // EspNetif::new_with_conf(&NetifConfiguration {
+        //     ip_configuration: ipv4::Configuration::Client(ipv4ClientConfiguration {
+        //         dns: Some(Ipv4Addr::new(1, 1, 1, 1)),
+        //         dhcp_enabled: true,
+        //     }),
+        //     ..NetifConfiguration::wifi_default_client()
+        // })?,
         EspNetif::new_with_conf(&NetifConfiguration {
             ip_configuration: ipv4::Configuration::Router(RouterConfiguration {
                 subnet: Subnet {
@@ -51,7 +65,7 @@ pub fn run() -> Result<(), EspError> {
                     mask: Mask(24),
                 },
                 dhcp_enabled: true,
-                dns: Some(IP_ADDRESS),
+                dns:  Some(Ipv4Addr::new(1, 1, 1, 1)),
                 secondary_dns: Some(IP_ADDRESS),
             }),
             ..NetifConfiguration::wifi_default_router()
@@ -59,42 +73,72 @@ pub fn run() -> Result<(), EspError> {
     )
     .expect("WiFi init failed");
 
-    wifi.set_configuration(&wifi::Configuration::AccessPoint(
+    wifi.set_configuration(&wifi::Configuration::Mixed(
+        ClientConfiguration {
+            ssid: WIFI_SSID.parse().unwrap(),
+            password: WIFI_PASSWORD.parse().unwrap(),
+            ..Default::default()
+        },
         AccessPointConfiguration {
             ssid: "Go_Board_Settings".parse().unwrap(),
             ..Default::default()
         },
     ))?;
-    wifi.start()?;
-    log::info!("Wi-Fi started");
+    let mut wifi = BlockingWifi::wrap(wifi, event_loop.clone())?;
 
-    log::info!("Starting DNS server...");
+    wifi.start()?;
+    info!("Wifi started");
+
+    wifi.connect()?;
+    info!("Wifi connected");
+
+    wifi.wait_netif_up()?;
+    info!("Wifi netif up");
+  
+    println!("CONNECTED connected!");
+    info!("Wi-Fi started");
+    
+    let (status, content) = outside_request(RequestType::Get {
+        url: "http://google.com/todos/1",
+    })?;
+    info!("GOT REQ {status} {content}",);
+
+    info!("Starting DNS server...");
     let mut dns = SimpleDns::try_new(IP_ADDRESS).expect("DNS server init failed");
     thread::spawn(move || loop {
         dns.poll().ok();
         sleep(Duration::from_millis(50));
     });
-    log::info!("DNS server started");
+    info!("DNS server started");
 
     let store = Arc::new(Mutex::new(String::new()));
 
-    log::info!("Starting HTTP server...");
+    info!("Starting HTTP server...");
     let config = Configuration::default();
     let mut server = EspHttpServer::new(&config).expect("HTTP server init failed");
     CaptivePortal::attach(&mut server, IP_ADDRESS).expect("Captive portal attach failed");
 
     server.fn_handler("/test", Method::Get, move |request| {
-        let page = format!(include_str!("web/test.html"));
+        let (status, content) = outside_request(RequestType::Get {
+            url: "http://google.com/todos/1",
+        })?;
+        let page = format!(include_str!("web/test.html"), content);
         request.into_ok_response()?.write_all(page.as_bytes())?;
         Ok(()) as Result<()>
     })?;
     server.fn_handler("/vite.svg", Method::Get, move |request| {
-        request.into_ok_response()?.write_all(include_bytes!("web/vite.svg"))?;
+        request
+            .into_ok_response()?
+            .write_all(include_bytes!("web/vite.svg"))?;
         Ok(()) as Result<()>
     })?;
     server.fn_handler("/assets/index-CdBTuBfJ.js", Method::Get, move |request| {
         request
-            .into_response(200, None, &[("Content-Type", "text/javascript; charset=utf-8")])?
+            .into_response(
+                200,
+                None,
+                &[("Content-Type", "text/javascript; charset=utf-8")],
+            )?
             .write_all(include_bytes!("web/assets/index-CdBTuBfJ.js"))?;
         Ok(()) as Result<()>
     })?;
@@ -104,9 +148,7 @@ pub fn run() -> Result<(), EspError> {
             .write_all(include_bytes!("web/assets/index-hTJyu8WO.css"))?;
         Ok(()) as Result<()>
     })?;
-    
-    
-    
+
     server.fn_handler("/styles.css", Method::Get, |request| {
         request
             .into_response(200, None, &[("Content-Type", "text/css; charset=utf-8")])?
@@ -116,7 +158,7 @@ pub fn run() -> Result<(), EspError> {
 
     let memo = store.clone();
     server.fn_handler("/", Method::Get, move |request| {
-        let memo = memo.lock().map_err(|e|anyhow!(e.to_string()))?;
+        let memo = memo.lock().map_err(|e| anyhow!(e.to_string()))?;
         let page = format!(include_str!("web/index.html"), memo);
         request.into_ok_response()?.write_all(page.as_bytes())?;
         Ok(()) as Result<()>
@@ -128,14 +170,14 @@ pub fn run() -> Result<(), EspError> {
         let len = request.read(&mut scratch)?;
         let req = std::str::from_utf8(&scratch[0..len])?;
         if let Some(("memo", req)) = req.split_once('=') {
-            
-            *memo.lock().map_err(|e|anyhow!(e.to_string()))? = urlencoding::decode(req)?.into_owned();
+            *memo.lock().map_err(|e| anyhow!(e.to_string()))? =
+                urlencoding::decode(req)?.into_owned();
         };
         request.into_response(302, None, &[("Location", "/")])?;
         Ok(()) as Result<()>
     })?;
 
-    log::info!("HTTP server started");
+    info!("HTTP server started");
 
     loop {
         sleep(Duration::from_millis(100));
