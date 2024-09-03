@@ -8,10 +8,17 @@ interface GoOnlineCredentialsCardParams {
     onSaveCredentials: (username: string, password: string) => void;
     authorized: boolean;
     initialUsername: string | null;
+    hiddenPassword: string | null,
     loading: boolean;
 }
 
-export const GoOnlineCredentialsCard = ({onSaveCredentials, authorized, initialUsername, loading}: GoOnlineCredentialsCardParams) => {
+export const GoOnlineCredentialsCard = ({
+                                            onSaveCredentials,
+                                            authorized,
+                                            initialUsername,
+                                            loading,
+                                            hiddenPassword
+                                        }: GoOnlineCredentialsCardParams) => {
     let [username, setUsername] = useState(initialUsername ?? "");
     let [password, setPassword] = useState("");
 
@@ -26,12 +33,12 @@ export const GoOnlineCredentialsCard = ({onSaveCredentials, authorized, initialU
         error={!authorized} loading={loading}>
 
         <Label>Username</Label>
-        <Input placeholder="Your username" value={initialUsername}
+        <Input placeholder="Your username" value={initialUsername ?? ""}
                onChange={(event) => {
                    setUsername((event.currentTarget as HTMLInputElement).value)
                }}/>
         <Label>Password</Label>
-        <PasswordInput placeholder="Your password"
+        <PasswordInput placeholder={hiddenPassword ?? "Your password"}
                        setValue={setPassword}/>
 
     </SettingsCard>

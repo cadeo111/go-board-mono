@@ -21,9 +21,10 @@ interface WifiCredentialsCardParams {
     hiddenPassword: string | null;
     initialSSID: string | null;
     connected: boolean;
+    loading:boolean;
 }
 
-export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, initialSSID, connected}: WifiCredentialsCardParams,
+export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, initialSSID, connected, loading}: WifiCredentialsCardParams,
 ) => {
     let [ssid, setWifiSSID] = useState(initialSSID ?? "");
     let [password, setWifiPassword] = useState("");
@@ -35,7 +36,7 @@ export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, init
         error={!connected}
         noErrorBadgeText={"Connected"}
         errorBadgeText={"Not Connected"}
-        loading={false}
+        loading={loading}
         buttonElement={<AlertDialog>
             <AlertDialogTrigger asChild>
                 <Button>Save</Button>
@@ -56,7 +57,7 @@ export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, init
             </AlertDialogContent>
         </AlertDialog>}>
         <Label>Network Name (SSID)</Label>
-        <Input placeholder="Wifi SSID" value={initialSSID} onChange={(event) => {
+        <Input placeholder="Wifi SSID" value={initialSSID ?? ""} onChange={(event) => {
             setWifiSSID((event.currentTarget as HTMLInputElement).value)
         }}/>
         <Label>Password</Label>
