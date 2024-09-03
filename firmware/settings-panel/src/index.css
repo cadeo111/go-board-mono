@@ -5,6 +5,8 @@
 @layer base {
   :root {
     --success:142.1 76.2% 36.3%;
+    /*TODO: FIX ERROR DARK MODE (CHECK ALL DARK MODE COLORS)*/
+    --error: 0 96.79% 54.72%;
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -36,6 +38,7 @@
 
   .dark {
     --success:141.9 69.2% 58%;
+    --error: 96.79% 54.72%;
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
     --card: 222.2 84% 4.9%;
