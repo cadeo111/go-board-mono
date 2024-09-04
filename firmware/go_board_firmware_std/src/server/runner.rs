@@ -1,14 +1,15 @@
 use crate::onlinego::https::{request as outside_request, RequestType};
 use crate::server::captive_portal::CaptivePortal;
 use crate::server::dns::SimpleDns;
-use crate::{WIFI_PASSWORD, WIFI_SSID};
+use crate::storage::NvsNamespace;
+use crate::wifi::{get_sync_wifi_ap_sta, WifiCredentials};
 use anyhow::{anyhow, Error, Result};
-use axum::response;
 use embedded_svc::http::server::Request;
 use embedded_svc::ipv4::ClientConfiguration as ipv4ClientConfiguration;
 use esp_idf_svc::hal::reset;
 use esp_idf_svc::http::server::EspHttpConnection;
 use esp_idf_svc::io::EspIOError;
+use esp_idf_svc::nvs::{EspNvsPartition, NvsDefault};
 use esp_idf_svc::wifi::BlockingWifi;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -49,54 +50,18 @@ pub fn run() -> Result<()> {
 
     let event_loop = EspSystemEventLoop::take()?;
     let peripherals = Peripherals::take()?;
+    let partition = EspDefaultNvsPartition::take()?;
+    let wifi_creds = WifiCredentials::get_saved_credentials_with_default(
+        partition.clone(),
+        WifiCredentials::get_from_env()?,
+    )?;
 
-    info!("Starting Wi-Fi...");
-    let wifi_driver = WifiDriver::new(
+    let mut wifi = get_sync_wifi_ap_sta(
+        &wifi_creds,
         peripherals.modem,
         event_loop.clone(),
-        EspDefaultNvsPartition::take().ok(),
+        partition.clone().into(),
     )?;
-    let mut wifi = EspWifi::wrap_all(
-        wifi_driver,
-        EspNetif::new(NetifStack::Sta)?,
-        // EspNetif::new_with_conf(&NetifConfiguration {
-        //     ip_configuration: ipv4::Configuration::Client(ipv4ClientConfiguration {
-        //         dns: Some(Ipv4Addr::new(1, 1, 1, 1)),
-        //         dhcp_enabled: true,
-        //     }),
-        //     ..NetifConfiguration::wifi_default_client()
-        // })?,
-        EspNetif::new_with_conf(&NetifConfiguration {
-            ip_configuration: ipv4::Configuration::Router(RouterConfiguration {
-                subnet: Subnet {
-                    gateway: IP_ADDRESS,
-                    mask: Mask(24),
-                },
-                dhcp_enabled: true,
-                dns: Some(IP_ADDRESS),
-                secondary_dns: Some(Ipv4Addr::new(1, 0, 0, 1)),
-            }),
-            ..NetifConfiguration::wifi_default_router()
-        })?,
-    )
-    .expect("WiFi init failed");
-
-    let ssid = WIFI_SSID.to_string();
-    let wifi_password = WIFI_PASSWORD.to_string();
-
-    wifi.set_configuration(&wifi::Configuration::Mixed(
-        ClientConfiguration {
-            ssid: (&ssid).parse().unwrap(),
-            password: (&wifi_password).parse().unwrap(),
-            ..Default::default()
-        },
-        AccessPointConfiguration {
-            ssid: "Go_Board_Settings".parse().unwrap(),
-            ..Default::default()
-        },
-    ))?;
-    let mut wifi = BlockingWifi::wrap(wifi, event_loop.clone())?;
-
     wifi.start()?;
     info!("Wifi started");
 
@@ -116,7 +81,7 @@ pub fn run() -> Result<()> {
     } else {
         info!("wifi netif up");
     }
-    let wifi_status = WifiStatus::new(is_connected, ssid, wifi_password);
+    let wifi_status = WifiStatus::new(is_connected, &wifi_creds);
     info!("Starting DNS server...");
     let mut dns = SimpleDns::try_new(IP_ADDRESS).expect("DNS server init failed");
     thread::spawn(move || loop {
@@ -288,11 +253,25 @@ pub struct WifiSaveData {
     pub password: String,
 }
 
+impl TryInto<WifiCredentials> for WifiSaveData {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> std::result::Result<WifiCredentials, Self::Error> {
+        WifiCredentials::new(&self.ssid, &self.password)
+    }
+}
+
 impl WifiSaveData {
-    fn handle_request(request: Request<&mut EspHttpConnection>) -> Result<()> {
+    fn handle_request(
+        request: Request<&mut EspHttpConnection>,
+        partition: EspNvsPartition<NvsDefault>,
+    ) -> Result<()> {
         let possible_data = handle_json_request::<WifiSaveData>(request)?;
         if let Some((req, data)) = possible_data {
-            info!("GOT  DATA: {data:?}");
+            let creds: WifiCredentials = data.try_into()?;
+            creds.set_saved_credentials(partition)?;
+            info!("Saved new wifi credentials {creds:?}");
+
             reset::restart();
             req.into_ok_response()?;
         }
@@ -313,13 +292,13 @@ pub struct WifiStatus {
 }
 
 impl WifiStatus {
-    pub fn new(connected: bool, ssid: String, password: String) -> Self {
-        let letter = password.graphemes(true).take(1).collect::<String>();
-        let count = password.graphemes(true).take(1).count() as u8;
+    pub fn new(connected: bool, creds: &WifiCredentials) -> Self {
+        let letter = creds.password.graphemes(true).take(1).collect::<String>();
+        let count = creds.password.graphemes(true).take(1).count() as u8;
 
         Self {
             connected,
-            ssid,
+            ssid: creds.ssid.to_string(),
             first_letter_of_password: letter,
             length_of_password: count,
         }

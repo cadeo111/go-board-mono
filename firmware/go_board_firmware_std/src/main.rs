@@ -42,12 +42,12 @@ mod neopixel;
 mod onlinego;
 mod server;
 mod wifi;
+mod storage;
 
 const BOARD_SIZE: usize = 16;
 const CHANNEL_SIZE: usize = BOARD_SIZE * 2;
 
-const WIFI_SSID: &'static str = env!("WIFI_SSID");
-const WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
+
 
 // To test, run `cargo run`, then when the server is up, use `nc -v espressif 12345` from
 // a machine on the same Wi-Fi network.
