@@ -9,6 +9,7 @@ import {GoOnlineCredentialsCard} from "@/components/custom/GoOnlineCredentialsCa
 
 import {ComponentChild} from "preact";
 import {useState} from "preact/hooks";
+import {useEffect} from "preact/compat";
 
 const StyleWrapper = ({children}: { children: ComponentChild }) => {
     return <div className="flex min-h-screen w-full flex-col">
@@ -27,9 +28,8 @@ const StyleWrapper = ({children}: { children: ComponentChild }) => {
     </div>;
 }
 
-function generateMaskedPassword(initialPasswordChar: string | null, initialPasswordNum: string | null): null | string {
-    const passwordNumOrNaN = Number(initialPasswordNum ?? 0)
-    let passwordNum = (isNaN(passwordNumOrNaN)) ? 0 : passwordNumOrNaN
+function generateMaskedPassword(initialPasswordChar: string | null, initialPasswordNum: number | null): null | string {
+    const passwordNum = initialPasswordNum ?? 0;
 
     if (passwordNum == 0) return null;
 
@@ -38,23 +38,47 @@ function generateMaskedPassword(initialPasswordChar: string | null, initialPassw
     return initialPasswordChar[0] + "*".repeat(passwordNum - 1);
 }
 
+// TODO: rename all interfaces as I_*
+interface I_WifiStatus {
+    connected: boolean,
+    ssid: string,
+    first_letter_of_password: string,
+    length_of_password: number,
+}
+
+const getWifiInfo = async (): Promise<I_WifiStatus | null> => {
+    let response = await fetch("/wifi-status")
+    if (!response.ok) {
+        alert("ERROR UPDATING WIFI CREDS REQ")
+        return null;
+    }
+    return await response.json() as I_WifiStatus;
+}
+
+
 export function App() {
 
     // example query string => /?w_id=randomssid&w_pfc=s&w_pn=6&og_un=cade&og_pfc=R&og_pn=20&w_c=c
 
 
+    const [wifiStatus, setWifiStatus] = useState<null | I_WifiStatus>(null);
+
+    useEffect(() => {
+        getWifiInfo().then((info) => {
+            setWifiStatus(info)
+        })
+    }, [])
+
+
     const qs = new URLSearchParams(location.search);
 
-    const initialWifiSSID = qs.get("w_id") ?? "";
-    const initialWifiPasswordChar = qs.get("w_pfc") ?? "";
-    const initialWifiPasswordCharNum = qs.get("w_pn")
-    const wifi_connected = qs.get("w_c") === "c"
 
     let [isWifiLoading, setWifiLoading] = useState(false);
 
     const initialOnlineGoUsername = qs.get("og_un") ?? "";
     const initialOnlineGoPasswordChar = qs.get("og_pfc") ?? "";
     const initialOnlineGoPasswordCharNum = qs.get("og_pn");
+
 
     const saveWifiCredentials = async (ssid: string, password: string) => {
         setWifiLoading(true);
@@ -66,6 +90,7 @@ export function App() {
         if (!response.ok) {
             // TODO: better request error handling (Popup?)
             alert("ERROR UPDATING WIFI CREDS REQ")
+            return
         }
     }
 
@@ -73,17 +98,17 @@ export function App() {
     return (
         <StyleWrapper>
             <WifiCredentialsCard
-                initialSSID={initialWifiSSID}
-                hiddenPassword={generateMaskedPassword(initialWifiPasswordChar, initialWifiPasswordCharNum)}
+                initialSSID={wifiStatus?.ssid ?? null}
+                hiddenPassword={generateMaskedPassword(wifiStatus?.first_letter_of_password ?? null, wifiStatus?.length_of_password ?? null)}
                 onSaveWifiCredentials={async ({ssid, password}) => {
                     await saveWifiCredentials(ssid, password)
                 }}
                 loading={isWifiLoading}
-                connected={wifi_connected}/>
+                connected={wifiStatus?.connected ?? false}/>
             <GoOnlineCredentialsCard
                 authorized={false}
                 initialUsername={initialOnlineGoUsername}
-                hiddenPassword={generateMaskedPassword(initialOnlineGoPasswordChar, initialOnlineGoPasswordCharNum)}
+                hiddenPassword={generateMaskedPassword(initialOnlineGoPasswordChar, Number(initialOnlineGoPasswordCharNum))}
                 onSaveCredentials={(username, password) => {
                     console.log(username, password)
                 }}
