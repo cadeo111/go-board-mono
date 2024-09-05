@@ -51,9 +51,13 @@ const getWifiInfo = async (): Promise<I_WifiStatus | null> => {
     if (!response.ok) {
         alert("ERROR UPDATING WIFI CREDS REQ")
         return null;
+    }else {
+        return await response.json() as I_WifiStatus;
     }
-    return await response.json() as I_WifiStatus;
 }
+
+
+
 
 
 export function App() {
@@ -64,7 +68,9 @@ export function App() {
     const [wifiStatus, setWifiStatus] = useState<null | I_WifiStatus>(null);
 
     useEffect(() => {
+        console.log("INFO!")
         getWifiInfo().then((info) => {
+            console.log("INFO!")
             setWifiStatus(info)
         })
     }, [])

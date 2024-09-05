@@ -32,8 +32,8 @@ impl OauthResponseError {
     }
 }
 
-#[derive(Deserialize, Debug)]
-struct OauthResponseValid {
+#[derive(Serialize, Deserialize, Debug,Clone )]
+pub struct OauthResponseValid {
     pub access_token: AuthToken,
     pub expires_in: i32,
     pub token_type: String,
@@ -60,7 +60,7 @@ impl<'s> AuthPasswordData<'s> {
     }
 }
 
-fn auth_with_password(
+pub fn auth_with_password(
     client_id: impl AsRef<str>,
     username: impl AsRef<str>,
     password: impl AsRef<str>,

@@ -40,7 +40,7 @@ use tokio::{join, select};
 mod encoder;
 mod neopixel;
 mod onlinego;
-mod server;
+mod settings;
 mod wifi;
 mod storage;
 
@@ -49,14 +49,14 @@ const CHANNEL_SIZE: usize = BOARD_SIZE * 2;
 
 
 
-// To test, run `cargo run`, then when the server is up, use `nc -v espressif 12345` from
+// To test, run `cargo run`, then when the settings is up, use `nc -v espressif 12345` from
 // a machine on the same Wi-Fi network.
 const TCP_LISTENING_PORT: u16 = 12345;
 
 esp_app_desc!();
 
 fn main() -> Result<()> {
-    server::runner::run().map_err(|e| anyhow!(e))
+    settings::runner::run().map_err(|e| anyhow!(e))
 
     // // It is necessary to call this function once. Otherwise, some patches to the runtime
     // // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     //         let mut led = tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }, { BOARD_SIZE }>(
     //             board_leds, channel0, rx,
     //         ));
-    //         // info!("Preparing to launch echo server...");
+    //         // info!("Preparing to launch echo settings...");
     //         // tokio::spawn(echo_server(tx.clone()));
     //         info!("Preparing to launch requester...");
     //         let mut rq = tokio::spawn(requester(tx.clone()));

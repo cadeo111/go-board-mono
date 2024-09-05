@@ -1,6 +1,5 @@
-use crate::server::runner::IP_ADDRESS;
+use crate::settings::runner::IP_ADDRESS;
 use crate::storage::NvsNamespace;
-use crate::{WIFI_PASSWORD, WIFI_SSID};
 use anyhow::{anyhow, Result};
 use embedded_svc::ipv4;
 use embedded_svc::ipv4::ClientConfiguration as ipv4ClientConfiguration;
@@ -47,6 +46,7 @@ pub struct WifiConnection<'a> {
 impl<'a> WifiConnection<'a> {
     // Initialize the Wi-Fi driver but do not connect yet.
     pub async fn new(
+        creds:&WifiCredentials,
         modem: Modem,
         event_loop: EspEventLoop<System>,
         timer: EspTimerService<Task>,
@@ -74,7 +74,7 @@ impl<'a> WifiConnection<'a> {
         let state = Arc::new(WifiState {
             ip_addr: RwLock::new(None),
             mac_address,
-            ssid: WIFI_SSID.to_string(),
+            ssid: creds.ssid.to_string(),
         });
 
         info!("Initializing async wifi");
@@ -105,8 +105,8 @@ impl<'a> WifiConnection<'a> {
         // Set the Wi-Fi configuration
         info!("Setting credentials...");
         let client_config = WifiClientConfiguration {
-            ssid: WIFI_SSID.parse().unwrap(),
-            password: WIFI_PASSWORD.parse().unwrap(),
+            ssid: creds.ssid.parse().unwrap(),
+            password: creds.password.parse().unwrap(),
             ..Default::default()
         };
 
@@ -169,12 +169,12 @@ impl<'a> WifiLoop<'a> {
         Self { wifi }
     }
 
-    pub async fn configure(&mut self) -> anyhow::Result<(), EspError> {
+    pub async fn configure(&mut self, creds:&WifiCredentials) -> anyhow::Result<(), EspError> {
         info!("Setting Wi-Fi credentials...");
         self.wifi
             .set_configuration(&WifiConfiguration::Client(WifiClientConfiguration {
-                ssid: WIFI_SSID.parse().unwrap(),
-                password: WIFI_PASSWORD.parse().unwrap(),
+                ssid: creds.ssid.parse().unwrap(),
+                password: creds.password.parse().unwrap(),
                 ..Default::default()
             }))?;
 
@@ -182,12 +182,12 @@ impl<'a> WifiLoop<'a> {
         self.wifi.start().await
     }
 
-    pub async fn configure_ap(&mut self, ipv4addr: Ipv4Addr) -> anyhow::Result<(), EspError> {
+    pub async fn configure_ap(&mut self, ipv4addr: Ipv4Addr, creds:&WifiCredentials) -> anyhow::Result<(), EspError> {
         info!("Setting Wi-Fi credentials...");
         self.wifi.set_configuration(&WifiConfiguration::Mixed(
             WifiClientConfiguration {
-                ssid: WIFI_SSID.parse().unwrap(),
-                password: WIFI_PASSWORD.parse().unwrap(),
+                ssid: creds.ssid.parse().unwrap(),
+                password: creds.password.parse().unwrap(),
                 ..Default::default()
             },
             AccessPointConfiguration {
@@ -253,10 +253,10 @@ impl WifiCredentials {
         default: Self,
     ) -> Result<Self> {
         let value = Self::get_saved_credentials(partition)?;
-        match value {
-            None => Ok(default),
-            Some(v) => Ok(v),
-        }
+        Ok(value.unwrap_or_else(|| {
+            info!("falling back to default for saved wifi credentials");
+            default
+        }))
     }
     pub fn get_saved_credentials(partition: EspNvsPartition<NvsDefault>) -> Result<Option<Self>> {
         let mut nvs = NvsNamespace::access(partition, WifiCredentials::namespace(), false)?;
@@ -292,7 +292,7 @@ impl WifiCredentials {
 }
 
 pub fn get_sync_wifi_ap_sta<'d>(
-    creds:&WifiCredentials,
+    creds: &WifiCredentials,
     modem: Modem,
     event_loop: EspEventLoop<System>,
     default_partition: Option<EspDefaultNvsPartition>,

@@ -15,6 +15,7 @@ import {
     AlertDialogTrigger
 } from "@/components/ui/alert-dialog.tsx";
 import {Button} from "@/components/ui/button.tsx";
+import {useEffect} from "preact/compat";
 
 interface WifiCredentialsCardParams {
     onSaveWifiCredentials: (creds: { ssid: string; password: string }) => void;
@@ -24,9 +25,18 @@ interface WifiCredentialsCardParams {
     loading:boolean;
 }
 
+
+
 export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, initialSSID, connected, loading}: WifiCredentialsCardParams,
 ) => {
-    let [ssid, setWifiSSID] = useState(initialSSID ?? "");
+    let [ssid, setWifiSSID] = useState<null|string>();
+
+    useEffect(() => {
+        if(ssid == null){
+            setWifiSSID(initialSSID)
+        }
+    }, [initialSSID]);
+
     let [password, setWifiPassword] = useState("");
 
 
@@ -52,12 +62,13 @@ export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, init
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => onSaveWifiCredentials({ssid, password})}>Save & Restart</AlertDialogAction>
+                    <AlertDialogAction onClick={() => onSaveWifiCredentials({ssid:ssid??"", password})}>Save & Restart</AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>}>
         <Label>Network Name (SSID)</Label>
-        <Input placeholder="Wifi SSID" value={initialSSID ?? ""} onChange={(event) => {
+        <Input placeholder="Wifi SSID" value={ssid ?? ""}
+               onChange={(event) => {
             setWifiSSID((event.currentTarget as HTMLInputElement).value)
         }}/>
         <Label>Password</Label>

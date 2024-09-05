@@ -3,6 +3,7 @@ import {Input} from "@/components/ui/input.tsx";
 import {PasswordInput} from "@/components/custom/PasswordInput.tsx";
 import {useState} from "preact/hooks";
 import {SettingsCard} from "@/components/custom/SettingsCard.tsx";
+import {useEffect} from "preact/compat";
 
 interface GoOnlineCredentialsCardParams {
     onSaveCredentials: (username: string, password: string) => void;
@@ -19,7 +20,15 @@ export const GoOnlineCredentialsCard = ({
                                             loading,
                                             hiddenPassword
                                         }: GoOnlineCredentialsCardParams) => {
-    let [username, setUsername] = useState(initialUsername ?? "");
+
+    let [username, setUsername] = useState<null | string>();
+    useEffect(() => {
+        if (username == null) {
+            setUsername(initialUsername)
+        }
+    }, [initialUsername]);
+
+
     let [password, setPassword] = useState("");
 
     return <SettingsCard
@@ -28,12 +37,12 @@ export const GoOnlineCredentialsCard = ({
         noErrorBadgeText={"Authorized"}
         errorBadgeText={"Error"}
         onSave={() => {
-            onSaveCredentials(username, password)
+            onSaveCredentials(username ?? "", password)
         }}
         error={!authorized} loading={loading}>
 
         <Label>Username</Label>
-        <Input placeholder="Your username" value={initialUsername ?? ""}
+        <Input placeholder="Your username" value={username ??""}
                onChange={(event) => {
                    setUsername((event.currentTarget as HTMLInputElement).value)
                }}/>
