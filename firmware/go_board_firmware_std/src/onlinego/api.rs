@@ -4,6 +4,7 @@ use super::status_codes::StatusCode;
 use crate::storage::SaveInNvs;
 use anyhow::{anyhow, Result};
 use esp_idf_svc::sys::const_format::formatcp;
+use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -58,13 +59,15 @@ pub struct OauthResponseValid {
     // raw_scope: String, // must still be parsed, not necessary at the moment
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, MaxSize)]
 pub struct OnlineGoLoginInfo {
-    pub username: String,
-    pub password: String,
+    pub username: heapless::String<100>,
+    pub password: heapless::String<100>,
 }
 impl OnlineGoLoginInfo {
-    pub fn auth_with_password(&self) -> Result<Result<OauthResponseValid, OauthResponseErrorWithStatusCode>> {
+    pub fn auth_with_password(
+        &self,
+    ) -> Result<Result<OauthResponseValid, OauthResponseErrorWithStatusCode>> {
         auth_with_password(ONLINE_GO_CLIENT_ID, &self.username, &self.password)
     }
 }
@@ -76,6 +79,9 @@ impl SaveInNvs for OnlineGoLoginInfo {
 
     fn key() -> &'static str {
         "login"
+    }
+    fn get_struct_buffer<'a>() -> impl AsMut<[u8]> {
+        [0; Self::POSTCARD_MAX_SIZE]
     }
 }
 

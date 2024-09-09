@@ -46,7 +46,7 @@ pub struct WifiConnection<'a> {
 impl<'a> WifiConnection<'a> {
     // Initialize the Wi-Fi driver but do not connect yet.
     pub async fn new(
-        creds:&WifiCredentials,
+        creds: &WifiCredentials,
         modem: Modem,
         event_loop: EspEventLoop<System>,
         timer: EspTimerService<Task>,
@@ -169,7 +169,7 @@ impl<'a> WifiLoop<'a> {
         Self { wifi }
     }
 
-    pub async fn configure(&mut self, creds:&WifiCredentials) -> anyhow::Result<(), EspError> {
+    pub async fn configure(&mut self, creds: &WifiCredentials) -> anyhow::Result<(), EspError> {
         info!("Setting Wi-Fi credentials...");
         self.wifi
             .set_configuration(&WifiConfiguration::Client(WifiClientConfiguration {
@@ -182,7 +182,11 @@ impl<'a> WifiLoop<'a> {
         self.wifi.start().await
     }
 
-    pub async fn configure_ap(&mut self, ipv4addr: Ipv4Addr, creds:&WifiCredentials) -> anyhow::Result<(), EspError> {
+    pub async fn configure_ap(
+        &mut self,
+        ipv4addr: Ipv4Addr,
+        creds: &WifiCredentials,
+    ) -> anyhow::Result<(), EspError> {
         info!("Setting Wi-Fi credentials...");
         self.wifi.set_configuration(&WifiConfiguration::Mixed(
             WifiClientConfiguration {
@@ -241,17 +245,20 @@ pub struct WifiCredentials {
     pub password: heapless::String<64>,
 }
 
-impl SaveInNvs for WifiCredentials{
+impl SaveInNvs for WifiCredentials {
     fn namespace() -> &'static str {
         "wifi"
     }
     fn key() -> &'static str {
         "credentials"
     }
+
+    fn get_struct_buffer<'a>() -> impl AsMut<[u8]> {
+        [0;Self::POSTCARD_MAX_SIZE]
+    }
 }
 
 impl WifiCredentials {
-    
     pub fn get_from_env() -> Result<Self> {
         const WIFI_SSID: &'static str = env!("WIFI_SSID");
         const WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
@@ -274,7 +281,6 @@ pub fn get_sync_wifi_ap_sta<'d>(
     event_loop: EspEventLoop<System>,
     default_partition: Option<EspDefaultNvsPartition>,
 ) -> Result<BlockingWifi<EspWifi<'d>>> {
-    
     info!("Starting Wi-Fi...");
     let wifi_driver = WifiDriver::new(modem, event_loop.clone(), default_partition)?;
     let mut wifi = EspWifi::wrap_all(

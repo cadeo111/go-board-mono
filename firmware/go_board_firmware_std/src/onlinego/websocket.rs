@@ -34,9 +34,7 @@ pub mod example {
     use log::info;
 
     use std::sync::mpsc;
-
-    const SSID: &str = "";//env!("WIFI_SSID");
-    const PASSWORD: &str = "";//env!("WIFI_PASS");
+    
     const ECHO_SERVER_URI: &str = "wss://echo.websocket.org";
 
     /// The PEM-encoded ISRG Root X1 certificate at the end of the cert chain
@@ -84,19 +82,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
     }
 
     pub fn main() -> anyhow::Result<()> {
-        esp_idf_svc::sys::link_patches();
-        EspLogger::initialize_default();
-
-        // Setup Wifi
-        let peripherals = Peripherals::take()?;
-        let sys_loop = EspSystemEventLoop::take()?;
-        let nvs = EspDefaultNvsPartition::take()?;
-        let mut wifi = BlockingWifi::wrap(
-            EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
-            sys_loop,
-        )?;
-        connect_wifi(&mut wifi)?;
-
         // Connect websocket
         let config = EspWebSocketClientConfig {
             server_cert: Some(X509::pem_until_nul(SERVER_ROOT_CERT)),
@@ -124,29 +109,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
         Ok(())
     }
 
-    fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()> {
-        let wifi_configuration: Configuration = Configuration::Client(ClientConfiguration {
-            ssid: SSID.try_into().unwrap(),
-            bssid: None,
-            auth_method: AuthMethod::WPA2Personal,
-            password: PASSWORD.try_into().unwrap(),
-            channel: None,
-            ..Default::default()
-        });
-
-        wifi.set_configuration(&wifi_configuration)?;
-
-        wifi.start()?;
-        info!("Wifi started");
-
-        wifi.connect()?;
-        info!("Wifi connected");
-
-        wifi.wait_netif_up()?;
-        info!("Wifi netif up");
-
-        Ok(())
-    }
 
     fn handle_event(tx: &mpsc::Sender<ExampleEvent>, event: &Result<WebSocketEvent, EspIOError>) {
         if let Ok(event) = event {

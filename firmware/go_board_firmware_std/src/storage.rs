@@ -10,6 +10,7 @@ use static_assertions::{const_assert, const_assert_eq};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::mem;
+use std::ops::DerefMut;
 use std::rc::Rc;
 
 pub struct NvsNamespace {
@@ -82,15 +83,18 @@ impl NvsNamespace {
     }
 }
 
-pub trait SaveInNvs:
-    Sized + Serialize + DeserializeOwned + Debug + Clone
-{
+pub trait SaveInNvs: Sized + Serialize + DeserializeOwned + Debug + Clone + MaxSize {
     fn namespace() -> &'static str;
     fn key() -> &'static str;
+     
+    fn get_struct_buffer<'a>() ->impl AsMut<[u8]>;
+    
+
     fn get_saved_in_nvs(partition: EspNvsPartition<NvsDefault>) -> Result<Option<Self>> {
         let mut nvs = NvsNamespace::access(partition, Self::namespace(), false)?;
-        let mut buffer = vec![];
-        let s = nvs.get_struct::<Self>(Self::key(), &mut buffer)?;
+        
+        let mut struct_buffer = Self::get_struct_buffer();
+        let s = nvs.get_struct::<Self>(Self::key(), struct_buffer.as_mut())?;
         Ok(s)
     }
     fn get_saved_in_nvs_with_default(
@@ -108,7 +112,7 @@ pub trait SaveInNvs:
     }
     fn set_saved_in_nvs(&self, partition: EspNvsPartition<NvsDefault>) -> Result<()> {
         let mut nvs = NvsNamespace::access(partition, Self::namespace(), false)?;
-        let mut buffer = vec![];
-        nvs.set_struct::<Self>(Self::key(), self, &mut buffer)
+        let mut struct_buffer = Self::get_struct_buffer();
+        nvs.set_struct::<Self>(Self::key(), self, struct_buffer.as_mut())
     }
 }

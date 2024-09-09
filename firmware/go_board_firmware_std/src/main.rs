@@ -1,4 +1,3 @@
-#![feature(generic_const_exprs)]
 
 use std::num::NonZeroU32;
 use std::str;

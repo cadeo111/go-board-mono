@@ -86,7 +86,7 @@ impl<'s> CaptiveServer<'s> {
             MIMEtype::CSS,
         )?;
         self.add_static_file(
-            "/assets/index.js",
+            "/assets/index.css",
             include_str!("web/assets/index.css"),
             MIMEtype::CSS,
         )?;
