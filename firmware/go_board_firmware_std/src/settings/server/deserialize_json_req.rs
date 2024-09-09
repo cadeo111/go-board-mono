@@ -10,13 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::{ErrorKind, Read};
 
+/// Create a request that implments [std::io::Read]
 struct ReadableRequest<'a, 'r, 'c>(&'a mut Request<&'r mut EspHttpConnection<'c>>);
-
-// impl<'r, 'c> ReadableRequest<'r, 'c> {
-//     fn into_request(self) -> Request<&'r mut EspHttpConnection<'c>> {
-//         self.0
-//     }
-// }
 
 impl<'a, 'r, 'c> Read for &mut ReadableRequest<'a, 'r, 'c> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -71,7 +66,7 @@ pub enum DataResponseOrValue<T> {
 
 // todo: Explore  embedded_svc::http::server::asynch::Request
 /// an error would basically be unexpected failure, if it is an expected failure then a DataRequestResponse will be sent
-pub fn deserialize_json_from_request<'a: 'a, 'b: 'b, 'c:'c, T>(
+pub fn deserialize_json_from_request<'a: 'a, 'b: 'b, 'c: 'c, T>(
     request: &'c mut Request<&'a mut EspHttpConnection<'b>>,
 ) -> (DataResponseOrValue<T>)
 where
