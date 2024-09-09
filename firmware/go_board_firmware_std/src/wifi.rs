@@ -1,5 +1,5 @@
 use crate::settings::runner::IP_ADDRESS;
-use crate::storage::NvsNamespace;
+use crate::storage::{NvsNamespace, SaveInNvs};
 use anyhow::{anyhow, Result};
 use embedded_svc::ipv4;
 use embedded_svc::ipv4::ClientConfiguration as ipv4ClientConfiguration;
@@ -241,40 +241,17 @@ pub struct WifiCredentials {
     pub password: heapless::String<64>,
 }
 
-impl WifiCredentials {
-    fn key() -> &'static str {
-        "credentials"
-    }
+impl SaveInNvs for WifiCredentials{
     fn namespace() -> &'static str {
         "wifi"
     }
-    pub fn get_saved_credentials_with_default(
-        partition: EspNvsPartition<NvsDefault>,
-        default: Self,
-    ) -> Result<Self> {
-        let value = Self::get_saved_credentials(partition)?;
-        Ok(value.unwrap_or_else(|| {
-            info!("falling back to default for saved wifi credentials");
-            default
-        }))
+    fn key() -> &'static str {
+        "credentials"
     }
-    pub fn get_saved_credentials(partition: EspNvsPartition<NvsDefault>) -> Result<Option<Self>> {
-        let mut nvs = NvsNamespace::access(partition, WifiCredentials::namespace(), false)?;
+}
 
-        let mut v = [0; WifiCredentials::POSTCARD_MAX_SIZE];
-
-        let s = nvs.get_struct::<WifiCredentials>(WifiCredentials::key(), &mut v)?;
-        Ok(s)
-    }
-    pub fn set_saved_credentials(&self, partition: EspNvsPartition<NvsDefault>) -> Result<()> {
-        let mut nvs = NvsNamespace::access(partition, WifiCredentials::namespace(), false)?;
-
-        nvs.set_struct::<WifiCredentials, { WifiCredentials::POSTCARD_MAX_SIZE }>(
-            WifiCredentials::key(),
-            self,
-        )
-    }
-
+impl WifiCredentials {
+    
     pub fn get_from_env() -> Result<Self> {
         const WIFI_SSID: &'static str = env!("WIFI_SSID");
         const WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
@@ -297,6 +274,7 @@ pub fn get_sync_wifi_ap_sta<'d>(
     event_loop: EspEventLoop<System>,
     default_partition: Option<EspDefaultNvsPartition>,
 ) -> Result<BlockingWifi<EspWifi<'d>>> {
+    
     info!("Starting Wi-Fi...");
     let wifi_driver = WifiDriver::new(modem, event_loop.clone(), default_partition)?;
     let mut wifi = EspWifi::wrap_all(

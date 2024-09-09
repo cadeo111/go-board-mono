@@ -1,7 +1,8 @@
 use crate::onlinego::https::{request as outside_request, RequestType};
 use crate::settings::captive_portal::CaptivePortal;
 use crate::settings::dns::SimpleDns;
-use crate::storage::NvsNamespace;
+use crate::settings::server::server::{CaptiveServer};
+use crate::storage::{NvsNamespace, SaveInNvs};
 use crate::wifi::{get_sync_wifi_ap_sta, WifiCredentials};
 use anyhow::{anyhow, Error, Result};
 use embedded_svc::http::server::Request;
@@ -38,7 +39,7 @@ use std::{
     time::Duration,
 };
 use unicode_segmentation::UnicodeSegmentation;
-use crate::settings::server::server::{CaptiveServer, WifiStatus};
+use crate::settings::server::handlers::WifiStatus;
 
 pub const IP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 42, 1);
 
@@ -52,7 +53,7 @@ pub fn run() -> Result<()> {
     let event_loop = EspSystemEventLoop::take()?;
     let peripherals = Peripherals::take()?;
     let partition = EspDefaultNvsPartition::take()?;
-    let wifi_creds = WifiCredentials::get_saved_credentials_with_default(
+    let wifi_creds = WifiCredentials::get_saved_in_nvs_with_default(
         partition.clone(),
         WifiCredentials::get_from_env()?,
     )?;
@@ -92,7 +93,7 @@ pub fn run() -> Result<()> {
     info!("DNS settings started");
 
     info!("Starting HTTP settings...");
-    let mut server = CaptiveServer::new().map_err(|e|e.context("HTTP settings init failed"))?;
+    let mut server = CaptiveServer::new().map_err(|e| e.context("HTTP settings init failed"))?;
     server.init(partition.clone(), wifi_status)?;
     info!("HTTP settings started");
     info!("sending outside HTTPS request...");

@@ -1,11 +1,14 @@
 use super::auth_token::AuthToken;
 use super::https::{request, RequestType};
 use super::status_codes::StatusCode;
+use crate::storage::SaveInNvs;
 use anyhow::{anyhow, Result};
 use esp_idf_svc::sys::const_format::formatcp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::error::Error;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 const ONLINE_GO_CLIENT_ID: &'static str = env!("ONLINE_GO_CLIENT_ID");
 const ONLINE_GO_USERNAME: &'static str = env!("ONLINE_GO_USERNAME");
@@ -18,7 +21,7 @@ const OAUTH_URL: &str = formatcp!("{}/oauth2/", BASE_URL);
 
 /// PASSWORD AUTH
 #[derive(Serialize, Deserialize, Debug)]
-struct OauthResponseError {
+pub struct OauthResponseError {
     pub error: String, // will be empty string if all went well
     pub error_description: String,
 }
@@ -32,13 +35,48 @@ impl OauthResponseError {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug,Clone )]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct OauthResponseErrorWithStatusCode {
+    pub response: OauthResponseError,
+    pub status_code: StatusCode,
+}
+
+impl Display for OauthResponseErrorWithStatusCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:#?}", self)
+    }
+}
+
+impl Error for OauthResponseErrorWithStatusCode {}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OauthResponseValid {
-    pub access_token: AuthToken,
+    pub access_token: AuthToken, //DQTDfpBbE7pBh2E5GqwzxYSkb4AT1u
     pub expires_in: i32,
     pub token_type: String,
     pub refresh_token: String,
     // raw_scope: String, // must still be parsed, not necessary at the moment
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+pub struct OnlineGoLoginInfo {
+    pub username: String,
+    pub password: String,
+}
+impl OnlineGoLoginInfo {
+    pub fn auth_with_password(&self) -> Result<Result<OauthResponseValid, OauthResponseErrorWithStatusCode>> {
+        auth_with_password(ONLINE_GO_CLIENT_ID, &self.username, &self.password)
+    }
+}
+
+impl SaveInNvs for OnlineGoLoginInfo {
+    fn namespace() -> &'static str {
+        "og"
+    }
+
+    fn key() -> &'static str {
+        "login"
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -60,11 +98,11 @@ impl<'s> AuthPasswordData<'s> {
     }
 }
 
-pub fn auth_with_password(
+fn auth_with_password(
     client_id: impl AsRef<str>,
     username: impl AsRef<str>,
     password: impl AsRef<str>,
-) -> Result<OauthResponseValid> {
+) -> Result<Result<OauthResponseValid, OauthResponseErrorWithStatusCode>> {
     const REFRESH_TOKEN_URL: &str = formatcp!("{}token/", OAUTH_URL);
 
     let (status_code, s) = request(RequestType::Post {
@@ -79,13 +117,16 @@ pub fn auth_with_password(
         Err(_) => {
             let possible_error = serde_json::from_str::<OauthResponseError>(&s);
             match possible_error {
-                Ok(data) => Err(data.to_anyhow(status_code)),
+                Ok(response) => Ok(Err(OauthResponseErrorWithStatusCode {
+                    response,
+                    status_code,
+                })),
                 Err(e) => Err(anyhow!(e).context(
                     "Failed to parse valid oauth json and failed to parse valid error json",
                 )),
             }
         }
-        Ok(valid_oauth) => Ok(valid_oauth),
+        Ok(valid_oauth) => Ok(Ok(valid_oauth)),
     }
 }
 
@@ -210,15 +251,15 @@ struct LastMove {
 }
 
 impl BoardState {
-   pub fn finished(&self) -> bool {
+    pub fn finished(&self) -> bool {
         self.phase == "finished"
     }
 
-   pub fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.board.len()
     }
 
-   pub fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         if self.height() == 0 {
             0
         } else {
@@ -252,7 +293,7 @@ pub fn test_connection() -> Result<BoardState> {
     // let url = Url::parse_with_params("https://httpbun.org/post",
     //                                  &[("lang", "rust"), ("browser", "servo")])?;//"
 
-    let oauth = auth_with_password(ONLINE_GO_CLIENT_ID, ONLINE_GO_USERNAME, ONLINE_GO_PASSWORD)?;
+    let oauth = auth_with_password(ONLINE_GO_CLIENT_ID, ONLINE_GO_USERNAME, ONLINE_GO_PASSWORD)??;
     let games = get_current_player_games(&oauth.access_token)?;
     let game_data = get_game_data(games.games[0].id, &oauth.access_token)?;
     println!("{game_data:?}");

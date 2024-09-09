@@ -1,16 +1,16 @@
+use crate::wifi::WifiCredentials;
 use anyhow::{anyhow, Result};
 use esp_idf_svc::nvs::{EspNvs, EspNvsPartition, NvsDefault};
 use log::{debug, info};
 use postcard::experimental::max_size::MaxSize;
 use postcard::{from_bytes, to_vec};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use static_assertions::{const_assert, const_assert_eq};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
-
-
 
 pub struct NvsNamespace {
     pub name: &'static str,
@@ -32,18 +32,17 @@ impl NvsNamespace {
                 }
             })
     }
-    pub fn set_struct<StructType, const SIZE_OF_STRUCT_TYPE: usize>(
+    pub fn set_struct<StructType>(
         &mut self,
         key: &str,
         value: &StructType,
+        buffer: &mut [u8],
     ) -> Result<()>
     where
-        StructType: Serialize + MaxSize,
+        StructType: Serialize,
     {
-        match self
-            .nvs
-            .set_raw(key, &to_vec::<StructType, SIZE_OF_STRUCT_TYPE>(&value)?)
-        {
+        let buff = postcard::to_slice(&value, buffer)?;
+        match self.nvs.set_raw(key, buff) {
             Ok(_) => {
                 debug!("Key {key} updated for namespace {}", self.name);
                 Ok(())
@@ -54,16 +53,15 @@ impl NvsNamespace {
             ))),
         }
     }
-    pub fn get_struct<'buff, 'deserialize, StructType>(
+    pub fn get_struct<'buff, StructType>(
         &mut self,
         key: &str,
-        buf: &'buff mut [u8],
+        buffer: &mut [u8],
     ) -> Result<Option<StructType>>
     where
-        'buff: 'deserialize,
-        StructType: Deserialize<'deserialize> + MaxSize + Debug + Clone,
+        StructType: DeserializeOwned + Debug + Clone,
     {
-        let get_raw = self.nvs.get_raw(key, buf);
+        let get_raw = self.nvs.get_raw(key, buffer);
         let buff = match get_raw {
             Ok(v) => {
                 if let Some(the_struct) = v {
@@ -84,4 +82,33 @@ impl NvsNamespace {
     }
 }
 
-
+pub trait SaveInNvs:
+    Sized + Serialize + DeserializeOwned + Debug + Clone
+{
+    fn namespace() -> &'static str;
+    fn key() -> &'static str;
+    fn get_saved_in_nvs(partition: EspNvsPartition<NvsDefault>) -> Result<Option<Self>> {
+        let mut nvs = NvsNamespace::access(partition, Self::namespace(), false)?;
+        let mut buffer = vec![];
+        let s = nvs.get_struct::<Self>(Self::key(), &mut buffer)?;
+        Ok(s)
+    }
+    fn get_saved_in_nvs_with_default(
+        partition: EspNvsPartition<NvsDefault>,
+        default: Self,
+    ) -> Result<Self> {
+        let value = Self::get_saved_in_nvs(partition)?;
+        Ok(value.unwrap_or_else(|| {
+            debug!(
+                "falling back to default for nvs access for type {}",
+                std::any::type_name::<Self>()
+            );
+            default
+        }))
+    }
+    fn set_saved_in_nvs(&self, partition: EspNvsPartition<NvsDefault>) -> Result<()> {
+        let mut nvs = NvsNamespace::access(partition, Self::namespace(), false)?;
+        let mut buffer = vec![];
+        nvs.set_struct::<Self>(Self::key(), self, &mut buffer)
+    }
+}

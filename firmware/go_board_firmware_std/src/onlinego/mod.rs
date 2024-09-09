@@ -1,4 +1,5 @@
 pub mod api;
 mod auth_token;
 pub mod https;
-mod status_codes;
+pub mod status_codes;
+

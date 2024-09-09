@@ -20,6 +20,7 @@ use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU16;
 use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 
 /// An HTTP status code (`status-code` in RFC 7230 et al.).
 ///
@@ -42,7 +43,7 @@ use std::str::FromStr;
 /// assert_eq!(StatusCode::NOT_FOUND.as_u16(), 404);
 /// assert!(StatusCode::OK.is_success());
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StatusCode(NonZeroU16);
 
 /// A possible error value when converting a `StatusCode` from a `u16` or `&str`
