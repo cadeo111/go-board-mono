@@ -84,7 +84,8 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
     pub fn main() -> anyhow::Result<()> {
         // Connect websocket
         let config = EspWebSocketClientConfig {
-            server_cert: Some(X509::pem_until_nul(SERVER_ROOT_CERT)),
+            use_global_ca_store: true,
+            crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
             ..Default::default()
         };
         let timeout = Duration::from_secs(10);
