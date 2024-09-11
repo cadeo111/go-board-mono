@@ -7,10 +7,11 @@ import {Button} from "@/components/ui/button"
 import {Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,} from "@/components/ui/command"
 import {Popover, PopoverContent, PopoverTrigger,} from "@/components/ui/popover"
 import {useState} from "preact/hooks";
+import * as preact from "preact";
 
 
 interface ComboboxParams<T> {
-    options: { value: T; label: string }[];
+    options: { value: T; label: string|preact.ComponentChild }[];
     placeholderSearch: string;
     placeholderSelect: string;
 }

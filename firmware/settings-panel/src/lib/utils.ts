@@ -17,3 +17,27 @@ export type ElementRef<
             >["ref"] ? Instance
             : never
         : never;
+
+export function generateMaskedPassword(initialPasswordChar: string | null, initialPasswordNum: number | null): null | string {
+    const passwordNum = initialPasswordNum ?? 0;
+
+    if (passwordNum == 0) return null;
+
+    if (initialPasswordChar == null) return "*".repeat(passwordNum);
+
+    return initialPasswordChar[0] + "*".repeat(passwordNum - 1);
+}
+
+
+
+export interface I_GenericOk<OK> {
+    "is_ok": true,
+    "value": OK
+}
+
+export interface I_GenericError<ERROR> {
+    "is_ok": false,
+    "value": ERROR
+}
+
+export type I_GenericResponse<OK, ERROR> = I_GenericOk<OK> | I_GenericError<ERROR>
