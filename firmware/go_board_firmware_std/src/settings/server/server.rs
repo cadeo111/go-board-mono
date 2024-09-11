@@ -1,7 +1,7 @@
 use crate::onlinego::api::OnlineGoLoginInfo;
 use crate::onlinego::status_codes::StatusCode;
 use crate::settings::captive_portal::CaptivePortal;
-use crate::settings::server::handlers::{OnlineGoAccountStatus, WifiStatus};
+use crate::settings::server::handlers::{OnlineGoAccountStatus, OnlineGoGamesList, WifiStatus};
 use crate::wifi::WifiCredentials;
 use anyhow::{anyhow, Result};
 use embedded_svc::http::server::Request;
@@ -30,7 +30,7 @@ impl AsRef<str> for MIMEtype {
         match &self {
             MIMEtype::Javascript => "text/javascript",
             MIMEtype::CSS => "text/css",
-            MIMEtype::HTML => "text/plain ",
+            MIMEtype::HTML => "text/html ",
         }
     }
 }
@@ -80,11 +80,7 @@ impl<'s> CaptiveServer<'s> {
             include_str!("web/assets/index.js"),
             MIMEtype::Javascript,
         )?;
-        self.add_static_file(
-            "/styles.css",
-            include_str!("web/styles.css"),
-            MIMEtype::CSS,
-        )?;
+        self.add_static_file("/styles.css", include_str!("web/styles.css"), MIMEtype::CSS)?;
         self.add_static_file(
             "/assets/index.css",
             include_str!("web/assets/index.css"),
@@ -121,6 +117,7 @@ impl<'s> CaptiveServer<'s> {
         WifiCredentials::set_up_route(self, partition.clone())?;
         OnlineGoAccountStatus::set_up_route(self, partition.clone())?;
         OnlineGoLoginInfo::set_up_route(self, partition.clone())?;
+        OnlineGoGamesList::set_up_route(self, partition.clone())?;
         Ok(())
     }
 }

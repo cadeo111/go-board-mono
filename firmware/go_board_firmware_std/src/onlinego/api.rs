@@ -182,13 +182,15 @@ pub fn get_current_player(auth_token: &AuthToken) -> Result<Player> {
     }
 }
 
-/// END PLAYER
+// END PLAYER
 
-/// START GAME
+// START GAME
+
+/// List of games from api
 #[derive(Serialize, Deserialize, Debug)]
-struct GameList {
+pub struct GameList {
     #[serde(rename = "results")]
-    games: Vec<GameListData>,
+    pub games: Vec<GameListData>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -198,6 +200,8 @@ pub struct GameListData {
     pub width: i32,
     pub height: i32,
     pub players: HashMap<String, Player>,
+    /// when the game was started
+    pub started: String,
     pub black_lost: bool,
     pub white_lost: bool,
 }

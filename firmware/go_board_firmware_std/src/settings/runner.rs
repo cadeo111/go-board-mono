@@ -111,7 +111,7 @@ pub fn run() -> Result<()> {
             }
         }
         info!("doing web socket stuff");
-        crate::onlinego::websocket::example::main()?;
+        // crate::onlinego::websocket::test()?;
     }
     info!("Sent outside HTTPS request");
     loop {

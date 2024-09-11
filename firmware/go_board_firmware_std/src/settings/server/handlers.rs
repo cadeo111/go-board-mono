@@ -1,5 +1,5 @@
 use crate::onlinego;
-use crate::onlinego::api::OnlineGoLoginInfo;
+use crate::onlinego::api::{get_current_player_games, GameList, OnlineGoLoginInfo};
 use crate::onlinego::status_codes::StatusCode;
 use crate::settings::server::deserialize_json_req::{
     deserialize_json_from_request, DataResponseOrValue,
@@ -24,6 +24,7 @@ pub enum HandlerRoute {
     WifiStatus,
     OnlineGoAccountStatus,
     OnlineGoLoginInfo,
+    OnlineGoGamesList,
 }
 impl AsRef<str> for HandlerRoute {
     fn as_ref(&self) -> &'static str {
@@ -32,6 +33,7 @@ impl AsRef<str> for HandlerRoute {
             HandlerRoute::WifiStatus => "/wifi-status",
             HandlerRoute::OnlineGoAccountStatus => "/online-go-status",
             HandlerRoute::OnlineGoLoginInfo => "/online-go-login",
+            HandlerRoute::OnlineGoGamesList => "/online-go-games-list",
         }
     }
 }
@@ -200,3 +202,42 @@ impl CaptiveServerHandler<HandlerRoute> for OnlineGoLoginInfo {
     }
 }
 
+pub struct OnlineGoGamesList {}
+
+impl CaptiveServerHandler<HandlerRoute> for OnlineGoGamesList {
+    type RequestExtraParameters = EspNvsPartition<NvsDefault>;
+
+    fn method() -> Method {
+        Method::Get
+    }
+
+    fn url() -> HandlerRoute {
+        HandlerRoute::OnlineGoGamesList
+    }
+
+    /// sends [GameList]
+    fn create_handler(
+        nvs: Self::RequestExtraParameters,
+    ) -> impl for<'r> Fn(&mut Request<&mut EspHttpConnection<'r>>) -> Result<DataResponse> + Send + 'static
+    {
+        move |_| {
+            let saved_info = OnlineGoLoginInfo::get_saved_in_nvs(nvs.clone())?;
+            match saved_info {
+                Some(saved_info) => match saved_info.auth_with_password()? {
+                    Ok(valid) => {
+                        let games: GameList = get_current_player_games(&valid.access_token)?;
+                        Ok(DataResponse::Ok(Some(serde_json::to_value(&games)?)))
+                    }
+                    Err(err) => Ok(DataResponse::HandledErr(
+                        StatusCode::UNAUTHORIZED,
+                        serde_json::to_value(&err)?,
+                    )),
+                },
+                None => Ok(DataResponse::HandledErr(
+                    StatusCode::UNAUTHORIZED,
+                    serde_json::to_value(&OnlineGoAccountStatus::default())?,
+                )),
+            }
+        }
+    }
+}
