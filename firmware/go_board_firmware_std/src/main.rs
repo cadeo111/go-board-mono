@@ -1,4 +1,3 @@
-
 use std::num::NonZeroU32;
 use std::str;
 use std::sync::Arc;
@@ -7,7 +6,8 @@ use crate::encoder::RotaryEncoderState;
 use crate::neopixel::led_ctrl::{led_ctrl, LedChange};
 use crate::neopixel::rgb::Rgb;
 use crate::onlinego::api::test_connection;
-use crate::wifi::WifiLoop;
+use crate::storage::SaveInNvs;
+use crate::wifi::{WifiCredentials, WifiLoop};
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
@@ -24,7 +24,7 @@ use esp_idf_svc::sys;
 use esp_idf_svc::sys::{esp, esp_app_desc};
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
-use log::info;
+use log::{error, info};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -42,116 +42,130 @@ mod encoder;
 mod neopixel;
 mod onlinego;
 mod settings;
-mod wifi;
 mod storage;
+mod wifi;
 
 const BOARD_SIZE: usize = 16;
 const CHANNEL_SIZE: usize = BOARD_SIZE * 2;
-
-
 
 // To test, run `cargo run`, then when the settings is up, use `nc -v espressif 12345` from
 // a machine on the same Wi-Fi network.
 const TCP_LISTENING_PORT: u16 = 12345;
 
-esp_app_desc!();
+//
+// esp_app_desc!();
 
 fn main() -> Result<()> {
-    settings::runner::run().map_err(|e| anyhow!(e))
+    // It is necessary to call this function once. Otherwise, some patches to the runtime
+    // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
+    sys::link_patches();
 
-    // // It is necessary to call this function once. Otherwise, some patches to the runtime
-    // // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
-    // sys::link_patches();
-    //
-    // // Bind the log crate to the ESP Logging facilities
-    // esp_idf_svc::log::EspLogger::initialize_default();
-    //
-    // // eventfd is needed by our mio poll implementation.  Note you should set max_fds
-    // // higher if you have other code that may need eventfd.
-    // info!("Setting up eventfd...");
-    // let config = sys::esp_vfs_eventfd_config_t {
-    //     max_fds: 1,
-    //     ..Default::default()
-    // };
-    //
-    // {
-    //     esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } }
-    // }?;
-    //
-    // info!("Setting up board...");
-    // let peripherals = Peripherals::take().unwrap();
-    // let sysloop = EspSystemEventLoop::take()?;
-    // let timer = EspTaskTimerService::new()?;
-    // let nvs = EspDefaultNvsPartition::take()?;
-    //
-    // // GPIOS
-    // let board_leds = peripherals.pins.gpio3;
-    // let channel0 = peripherals.rmt.channel0;
-    // let rotary_encoder_btn_pin = peripherals.pins.gpio4;
-    // let rotary_encoder_clk_pin = peripherals.pins.gpio5;
-    // let rotary_encoder_dt_pin = peripherals.pins.gpio6;
-    //
-    // info!("Initializing rotary encoder...");
-    //
-    // let rotary_encoder = RotaryEncoderState::init(
-    //     rotary_encoder_btn_pin.into(),
-    //     rotary_encoder_clk_pin.into(),
-    //     rotary_encoder_dt_pin.into(),
-    // )?;
-    //
-    // info!("Initializing Wi-Fi...");
-    // let wifi = AsyncWifi::wrap(
-    //     EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs))?,
-    //     sysloop,
-    //     timer.clone(),
-    // )?;
-    //
-    // let (tx, rx) = mpsc::channel::<LedChange>(CHANNEL_SIZE);
-    //
-    // info!("Starting async run loop");
-    // tokio::runtime::Builder::new_current_thread()
-    //     .enable_all()
-    //     .build()?
-    //     .block_on(async move {
-    //         let mut wifi_loop = WifiLoop::new(wifi);
-    //         wifi_loop.configure().await?;
-    //         wifi_loop.initial_connect().await?;
-    //         info!("Preparing to launch rotary encoder monitor...");
-    //         let mut rc = tokio::spawn(async {
-    //             let mut rotary_encoder = rotary_encoder;
-    //             rotary_encoder.monitor_encoder_spin().await
-    //         });
-    //         info!("Preparing to launch led blinker...");
-    //         let mut led = tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }, { BOARD_SIZE }>(
-    //             board_leds, channel0, rx,
-    //         ));
-    //         // info!("Preparing to launch echo settings...");
-    //         // tokio::spawn(echo_server(tx.clone()));
-    //         info!("Preparing to launch requester...");
-    //         let mut rq = tokio::spawn(requester(tx.clone()));
-    //         info!("Entering main Wi-Fi run loop...");
-    //         let mut wifi = tokio::spawn(wifi_loop.stay_connected());
-    //         return select! {
-    //             result = &mut rc =>{
-    //                 info!("Rotation Control exited");
-    //                 result?
-    //             }
-    //            result = &mut led => {
-    //                   info!("LED exited");
-    //                 result?
-    //             }
-    //             result = &mut rq => {
-    //                   info!("Requester exited");
-    //                 result?
-    //             }
-    //             result = &mut wifi =>{
-    //                   info!("Wifi exited");
-    //                 let r:Result<()> = result?.map_err(|e| anyhow!(e));
-    //                 r
-    //             }
-    //         };
-    //     })?;
-    // Ok(())
+    // Bind the log crate to the ESP Logging facilities
+    esp_idf_svc::log::EspLogger::initialize_default();
+
+    // eventfd is needed by our mio poll implementation.  Note you should set max_fds
+    // higher if you have other code that may need eventfd.
+    info!("Setting up eventfd...");
+    let config = sys::esp_vfs_eventfd_config_t {
+        max_fds: 1,
+        ..Default::default()
+    };
+
+    {
+        esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } }
+    }?;
+
+    info!("Setting up board...");
+    let peripherals = Peripherals::take().unwrap();
+    let sysloop = EspSystemEventLoop::take()?;
+    let timer = EspTaskTimerService::new()?;
+    let nvs = EspDefaultNvsPartition::take()?;
+
+    let wifi_creds = WifiCredentials::get_saved_in_nvs_with_default(
+        nvs.clone(),
+        WifiCredentials::get_from_env()?,
+    )?;
+
+    // GPIOS
+    let board_leds = peripherals.pins.gpio3;
+    let channel0 = peripherals.rmt.channel0;
+    let rotary_encoder_btn_pin = peripherals.pins.gpio4;
+    let rotary_encoder_clk_pin = peripherals.pins.gpio5;
+    let rotary_encoder_dt_pin = peripherals.pins.gpio6;
+
+    info!("Initializing rotary encoder...");
+
+    let rotary_encoder = RotaryEncoderState::init(
+        rotary_encoder_btn_pin.into(),
+        rotary_encoder_clk_pin.into(),
+        rotary_encoder_dt_pin.into(),
+    )?;
+
+    info!("checking if should boot into settings mode...");
+    let re_button_pressed = rotary_encoder.is_button_pressed();
+    if (re_button_pressed) {
+        info!("going into settings mode");
+        settings::runner::run(nvs, peripherals.modem, sysloop.clone(), &wifi_creds)
+            .map_err(|e| anyhow!(e))?;
+        error!("[ERROR] exited settings without error, this should not happen...");
+        return Ok(());
+    } else {
+        info!("going into game-play mode");
+    }
+
+    info!("Initializing Wi-Fi...");
+    let wifi = AsyncWifi::wrap(
+        EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs))?,
+        sysloop,
+        timer.clone(),
+    )?;
+
+    let (tx, rx) = mpsc::channel::<LedChange>(CHANNEL_SIZE);
+
+    info!("Starting async run loop");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async move {
+            let mut wifi_loop = WifiLoop::new(wifi);
+            wifi_loop.configure(&wifi_creds).await?;
+            wifi_loop.initial_connect().await?;
+            info!("Preparing to launch rotary encoder monitor...");
+            let mut rc = tokio::spawn(async {
+                let mut rotary_encoder = rotary_encoder;
+                rotary_encoder.monitor_encoder_spin().await
+            });
+            info!("Preparing to launch led blinker...");
+            let mut led = tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }, { BOARD_SIZE }>(
+                board_leds, channel0, rx,
+            ));
+            // info!("Preparing to launch echo settings...");
+            // tokio::spawn(echo_server(tx.clone()));
+            info!("Preparing to launch requester...");
+            let mut rq = tokio::spawn(requester(tx.clone()));
+            info!("Entering main Wi-Fi run loop...");
+            let mut wifi = tokio::spawn(wifi_loop.stay_connected());
+            return select! {
+                result = &mut rc =>{
+                    info!("Rotation Control exited");
+                    result?
+                }
+               result = &mut led => {
+                      info!("LED exited");
+                    result?
+                }
+                result = &mut rq => {
+                      info!("Requester exited");
+                    result?
+                }
+                result = &mut wifi =>{
+                      info!("Wifi exited");
+                    let r:Result<()> = result?.map_err(|e| anyhow!(e));
+                    r
+                }
+            };
+        })?;
+    Ok(())
 }
 
 async fn requester(tx: Sender<LedChange>) -> Result<()> {

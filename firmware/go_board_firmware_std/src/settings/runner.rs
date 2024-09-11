@@ -1,12 +1,15 @@
 use crate::onlinego::https::{request as outside_request, RequestType};
 use crate::settings::captive_portal::CaptivePortal;
 use crate::settings::dns::SimpleDns;
-use crate::settings::server::server::{CaptiveServer};
+use crate::settings::server::handlers::WifiStatus;
+use crate::settings::server::server::CaptiveServer;
 use crate::storage::{NvsNamespace, SaveInNvs};
 use crate::wifi::{get_sync_wifi_ap_sta, WifiCredentials};
 use anyhow::{anyhow, Error, Result};
 use embedded_svc::http::server::Request;
 use embedded_svc::ipv4::ClientConfiguration as ipv4ClientConfiguration;
+use esp_idf_svc::eventloop::{EspEventLoop, System};
+use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::hal::reset;
 use esp_idf_svc::http::server::EspHttpConnection;
 use esp_idf_svc::io::EspIOError;
@@ -39,28 +42,23 @@ use std::{
     time::Duration,
 };
 use unicode_segmentation::UnicodeSegmentation;
-use crate::settings::server::handlers::WifiStatus;
 
 pub const IP_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 168, 42, 1);
 
-pub fn run() -> Result<()> {
-    unsafe {
-        sys::nvs_flash_init();
-    }
-    sys::link_patches();
-    EspLogger::initialize_default();
-
-    let event_loop = EspSystemEventLoop::take()?;
-    let peripherals = Peripherals::take()?;
-    let partition = EspDefaultNvsPartition::take()?;
-    let wifi_creds = WifiCredentials::get_saved_in_nvs_with_default(
-        partition.clone(),
-        WifiCredentials::get_from_env()?,
-    )?;
+pub fn run(
+    partition: EspNvsPartition<NvsDefault>,
+    modem: Modem,
+    event_loop: EspEventLoop<System>,
+    wifi_creds: &WifiCredentials,
+) -> Result<()> {
+    // let wifi_creds = WifiCredentials::get_saved_in_nvs_with_default(
+    //     partition.clone(),
+    //     WifiCredentials::get_from_env()?,
+    // )?;
 
     let mut wifi = get_sync_wifi_ap_sta(
         &wifi_creds,
-        peripherals.modem,
+        modem,
         event_loop.clone(),
         partition.clone().into(),
     )?;
@@ -83,7 +81,7 @@ pub fn run() -> Result<()> {
     } else {
         info!("wifi netif up");
     }
-    let wifi_status = WifiStatus::new(is_connected, &wifi_creds);
+    let wifi_status = WifiStatus::new(is_connected, wifi_creds);
     info!("Starting DNS settings...");
     let mut dns = SimpleDns::try_new(IP_ADDRESS).expect("DNS settings init failed");
     thread::spawn(move || loop {

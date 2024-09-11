@@ -74,6 +74,11 @@ impl<'a> RotaryEncoderState<'a> {
         })
     }
 
+    pub fn is_button_pressed(&self) -> bool {
+        // button is active low i'm pretty sure
+        self.button.get_level() == Level::Low
+    }
+
     pub async fn monitor_encoder_spin(&mut self) -> Result<()> {
         let mut current_direction;
         let mut counter = 0;
