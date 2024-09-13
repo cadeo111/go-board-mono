@@ -62,6 +62,7 @@ fn main() -> Result<()> {
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
+    
 
     // eventfd is needed by our mio poll implementation.  Note you should set max_fds
     // higher if you have other code that may need eventfd.
