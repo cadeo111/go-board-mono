@@ -216,6 +216,19 @@ impl CaptiveServerHandler<HandlerRoute> for OnlineGoGamesList {
     }
 
     /// sends [GameList]
+    /// ------------------------------------------------------------------------------------------
+    /// 
+    /// #### Get a list of games
+    /// 
+    ///      get the list of games for the user credentials currently saved
+    /// 
+    /// ##### Responses
+    /// 
+    /// > | http code     | content-type                      | response                                                            |
+    /// > |---------------|-----------------------------------|---------------------------------------------------------------------|
+    /// > | `200`         | `application/json;charset=UTF-8`  | {is_ok:true, value:[GameList]}                                      |
+    /// > | `401`         | `application/json;charset=UTF-8`  | {is_ok:false, value:<error>}   // unauthorized, need to set valid credentials                                                               |
+    /// ------------------------------------------------------------------------------------------
     fn create_handler(
         nvs: Self::RequestExtraParameters,
     ) -> impl for<'r> Fn(&mut Request<&mut EspHttpConnection<'r>>) -> Result<DataResponse> + Send + 'static

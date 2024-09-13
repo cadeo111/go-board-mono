@@ -21,6 +21,7 @@ pub struct CaptiveServer<'s> {
 
 enum MIMEtype {
     Javascript,
+    JSON,
     CSS,
     HTML,
 }
@@ -28,9 +29,10 @@ enum MIMEtype {
 impl AsRef<str> for MIMEtype {
     fn as_ref(&self) -> &'static str {
         match &self {
-            MIMEtype::Javascript => "text/javascript",
+            MIMEtype::Javascript => "application/javascript",
             MIMEtype::CSS => "text/css",
             MIMEtype::HTML => "text/html ",
+            MIMEtype::JSON => "application/json"
         }
     }
 }
@@ -184,7 +186,7 @@ impl DataResponse {
     fn send(self, r: Request<&mut EspHttpConnection>) -> Result<()> {
         let (value, code) = self.to_response_value();
 
-        r.into_response(code, None, &[("Content-Type", "text/json; charset=utf-8")])?
+        r.into_response(code, None, &[("Content-Type", "application/json; charset=utf-8")])?
             .write_all(value.to_string().as_bytes())?;
 
         if let DataResponse::UnhandledError(_, err) = self {
