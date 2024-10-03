@@ -6,7 +6,6 @@ use anyhow::{anyhow, Result};
 use esp_idf_svc::sys::const_format::formatcp;
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -139,7 +138,7 @@ fn auth_with_password(
 /// END PASSWORD AUTH
 
 /// PLAYER INFO
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Player {
     id: i64,
     username: String,
@@ -193,33 +192,42 @@ pub struct GameList {
     pub games: Vec<GameListData>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameListData {
     pub id: i64,
     pub name: String,
     pub width: i32,
     pub height: i32,
-    pub players: HashMap<String, Player>,
+    pub players: PlayerList,
     /// when the game was started
     pub started: String,
     pub black_lost: bool,
     pub white_lost: bool,
 }
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlayerList {
+    pub white: Player,
+    pub black: Player,
+}
 
 impl GameListData {
     // Description returns a formatted description of the game.
-    fn description(&self) -> String {
-        let ended = if self.game_over() { " (ended)" } else { "" };
+    pub fn description(&self) -> String {
+        let ended = if self.is_game_over() { " (ended)" } else { "" };
         format!(
             "{} (B) vs {} (W) ({}x{}){}",
-            self.players["black"], self.players["white"], self.width, self.height, ended
+            self.players.black, self.players.white, self.width, self.height, ended
         )
     }
 
     // GameOver returns true if the game has ended, otherwise false.
-    fn game_over(&self) -> bool {
+    pub fn is_game_over(&self) -> bool {
         // If a game is over, one of these will be false
         !self.black_lost || !self.white_lost
+    }
+
+    pub fn get_detail(&self, auth_token: &AuthToken) -> Result<BoardState> {
+        get_game_data(self.id, auth_token)
     }
 }
 
@@ -254,6 +262,24 @@ pub struct BoardState {
     pub last_move: LastMove,
 }
 
+pub enum BoardColor {
+    Empty = 0,
+    Black = 1,
+    White = 2,
+}
+
+impl TryFrom<i32> for BoardColor {
+    type Error = ();
+
+    fn try_from(v: i32) -> Result<Self, Self::Error> {
+        match v {
+            x if x == BoardColor::Black as i32 => Ok(BoardColor::Black),
+            x if x == BoardColor::White as i32 => Ok(BoardColor::White),
+            x if x == BoardColor::Empty as i32 => Ok(BoardColor::Empty),
+            _ => Err(()),
+        }
+    }
+}
 #[derive(Serialize, Deserialize, Debug)]
 struct LastMove {
     x: i32,
@@ -275,6 +301,14 @@ impl BoardState {
         } else {
             self.board[0].len()
         }
+    }
+
+    pub fn board_iter(&self) -> impl Iterator<Item = (u8, u8, &i32)> {
+        self.board
+            .iter()
+            .enumerate()
+            .map(|(x, v)| (x, v.iter().enumerate()))
+            .flat_map(|(x, iter)| iter.map(move |(y, v)| (x, y, v)))
     }
 }
 

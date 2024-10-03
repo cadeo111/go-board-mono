@@ -1,8 +1,8 @@
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-
 use anyhow::Result;
 use esp_idf_svc::hal::gpio::{AnyIOPin, AnyInputPin, Input, InterruptType, Level, PinDriver, Pull};
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use tokio::sync::broadcast::Sender;
 use tokio::sync::Notify;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -10,6 +10,7 @@ enum SpinDirection {
     CounterClockwise,
     Clockwise,
 }
+pub type EncoderInfo = (i32, SpinDirection);
 
 impl Display for SpinDirection {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -79,21 +80,22 @@ impl<'a> RotaryEncoderState<'a> {
         self.button.get_level() == Level::Low
     }
 
-    pub async fn monitor_encoder_spin(&mut self) -> Result<()> {
+    pub async fn monitor_encoder_spin(&mut self, on_change: Sender<EncoderInfo>) -> Result<()> {
         let mut current_direction;
         let mut counter = 0;
 
         loop {
             self.clk.enable_interrupt()?;
             self.clk_notify.notified().await;
-            if (self.clk.get_level() != self.dt.get_level()) {
+            if self.clk.get_level() != self.dt.get_level() {
                 current_direction = SpinDirection::Clockwise;
                 counter += 1;
             } else {
                 current_direction = SpinDirection::CounterClockwise;
                 counter -= 1;
             }
-            println!("counter: {}, direction: {}", counter, current_direction)
+            println!("counter: {}, direction: {}", counter, current_direction);
+            on_change.send((counter, current_direction)).await?;
         }
         Ok(())
     }

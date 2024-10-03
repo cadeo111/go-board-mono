@@ -7,7 +7,6 @@ use esp_idf_svc::hal::gpio::OutputPin;
 use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::rmt::config::TransmitConfig;
 use esp_idf_svc::hal::rmt::{PinState, Pulse, RmtChannel, TxRmtDriver, VariableLengthSignal};
-use log::debug;
 
 pub struct LedStrip<'tx, const SIZE: usize> {
     config: TransmitConfig,
@@ -38,6 +37,11 @@ impl<'tx, const SIZE: usize> LedStrip<'tx, SIZE> {
         let LedChange { x, y, color } = *change;
         let x: usize = x.into();
         let y: usize = y.into();
+        if x >= size {
+            return Err(anyhow!("x: {x} is out of bounds: {size}"));
+        } else if y >= size {
+            return Err(anyhow!("y: {y} is out of bounds: {size}"));
+        }
         let index = if x % 2 == 0 {
             x * size + y
         } else {

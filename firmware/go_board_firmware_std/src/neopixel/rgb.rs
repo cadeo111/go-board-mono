@@ -1,5 +1,5 @@
-use std::fmt::{Display, Formatter};
 use anyhow::bail;
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 pub struct Rgb {
@@ -10,7 +10,7 @@ pub struct Rgb {
 
 impl Display for Rgb {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Rgb{r,g, b} = self;
+        let Rgb { r, g, b } = self;
         write!(f, "({r}, {g}, {b})")
     }
 }
@@ -55,6 +55,10 @@ impl Rgb {
             b: GAMMA8[b as usize],
         }
     }
+
+    pub fn is_off(&self) -> bool {
+        self.r == 0 && self.g == 0 && self.b == 0
+    }
 }
 impl From<Rgb> for u32 {
     /// Convert RGB to u32 color value (24bit)
@@ -69,7 +73,13 @@ impl From<Rgb> for u32 {
 }
 
 pub const ORANGE: Rgb = Rgb::new(64, 41, 0);
+pub const RED: Rgb = Rgb::new(64, 0, 0);
 pub const PURPLE: Rgb = Rgb::new(58, 20, 58);
+pub const BLUE: Rgb = Rgb::new(0, 0, 64);
+
+pub const GREEN: Rgb = Rgb::new(0, 64, 0);
+
+pub const WHITE: Rgb = Rgb::new(40, 40, 40);
 
 /// used to correct to the right color/brigthness
 
