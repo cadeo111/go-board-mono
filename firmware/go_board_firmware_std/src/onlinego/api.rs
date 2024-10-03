@@ -269,14 +269,14 @@ pub enum BoardColor {
 }
 
 impl TryFrom<i32> for BoardColor {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(v: i32) -> Result<Self, Self::Error> {
         match v {
             x if x == BoardColor::Black as i32 => Ok(BoardColor::Black),
             x if x == BoardColor::White as i32 => Ok(BoardColor::White),
             x if x == BoardColor::Empty as i32 => Ok(BoardColor::Empty),
-            _ => Err(()),
+            _ => Err(anyhow!("Failed to convert board color! {}", v)),
         }
     }
 }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::encoder::{EncoderInfo, RotaryEncoderState};
 use crate::neopixel::led_ctrl::{led_ctrl, DisplayOnLeds, LedChange, LedOverlay};
+use crate::neopixel::led_font::score_board;
 use crate::neopixel::rgb::Rgb;
 use crate::onlinego::api;
 use crate::onlinego::api::{
@@ -154,6 +155,7 @@ fn main() -> Result<()> {
 
             // Check for current
 
+            let rx_ei = tx_ei.subscribe();
             info!("Preparing to launch rotary encoder monitor...");
             let mut rc = tokio::spawn(async {
                 let mut rotary_encoder = rotary_encoder;
@@ -169,7 +171,7 @@ fn main() -> Result<()> {
             info!("Entering main Wi-Fi run loop...");
             let mut wifi = tokio::spawn(wifi_loop.stay_connected());
             info!("starting main loop");
-            let mut main_loop = tokio::spawn(main_loop(tx.clone(), tx_ei.subscribe(), &auth_token));
+            let mut main_loop = tokio::spawn(main_loop(tx.clone(), rx_ei, auth_token));
 
             return select! {
                 result = &mut rc =>{
@@ -201,8 +203,8 @@ const EMPTY_SPOT: Rgb = Rgb::new(0, 0, 0);
 
 async fn main_loop(
     led_tx: Sender<LedChange>,
-    encoder_rx: BrReceiver<EncoderInfo>,
-    auth_token: &AuthToken,
+    mut encoder_rx: BrReceiver<EncoderInfo>,
+    auth_token: AuthToken,
 ) -> Result<()> {
     let current_player = api::get_current_player(&auth_token)?;
 
@@ -215,7 +217,7 @@ async fn main_loop(
             "Failed to get a game in game list, game list len  < 1"
         ));
     }
-
+    // TODO: Make sure this ARC<game> is required, prob could get away with local refs
     let current_game = Arc::new(game_list.games.first().unwrap().clone());
 
     let game_board_data = current_game.get_detail(&auth_token)?;
@@ -224,30 +226,52 @@ async fn main_loop(
     let overlay = LedOverlay::<{ BOARD_SIZE }, { BOARD_SIZE }, { 2 }>::new();
 
     // is the game complete?
-    if (current_game.is_game_over()) {
-        let gameboard_changes:Vec<LedChange> = game_board_data.board_iter().map(|(x, y, v)| {
-            let color: BoardColor = {
-                let res: Result<BoardColor> = (*v).try_into();
-                res.unwrap_or_else(|err| {
-                    error!("Unknown Board Color:{err}");
-                    BoardColor::Empty
-                })
-            };
+    if (current_game.is_game_over()
+        //TODO: Remove this after testing
+        || true
+    ) {
+        let gameboard_changes: Vec<LedChange> = game_board_data
+            .board_iter()
+            .map(|(x, y, v)| {
+                let color: BoardColor = {
+                    let res = (*v).try_into();
+                    res.unwrap_or_else(|err| {
+                        error!("Unknown Board Color:{err}");
+                        BoardColor::Empty
+                    })
+                };
 
-            let rgb = match color {
-                BoardColor::Empty => EMPTY_SPOT,
-                BoardColor::Black => BLACK_SPOT,
-                BoardColor::White => WHITE_SPOT,
-            };
+                let rgb = match color {
+                    BoardColor::Empty => EMPTY_SPOT,
+                    BoardColor::Black => BLACK_SPOT,
+                    BoardColor::White => WHITE_SPOT,
+                };
 
-            LedChange::new(x , y , rgb)
-        }).collect();
-        let sccore_changes:Vec<LedChange> = 
+                LedChange::new(x, y, rgb)
+            })
+            .collect();
+        let score_changes: heapless::Vec<LedChange, 68> = score_board(0, 0, 123, 432);
+
         // todo: create score display for led panel
         // let score_changes = current_game.
-        loop {}
-    } else {
-    }
+
+        let mut show_board = true;
+        loop {
+            // wait for encoder to move
+            let _ = encoder_rx.recv().await?;
+            // alternate between showing the end board state and the score
+            if (show_board) {
+                for change in &gameboard_changes {
+                    led_tx.send(*change).await?;
+                }
+            } else {
+                for change in &score_changes {
+                    led_tx.send(*change).await?;
+                }
+            }
+            show_board = !show_board;
+        }
+    } else {}
     Ok(())
 }
 

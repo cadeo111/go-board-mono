@@ -2,10 +2,10 @@ use crate::neopixel::led_ctrl::LedChange;
 use crate::neopixel::rgb::{Rgb, BLUE, GREEN, RED, WHITE};
 
 pub fn score_board(
-    black_score: u16,
-    white_score: u16,
     start_x: u8,
     start_y: u8,
+    black_score: u16,
+    white_score: u16,
 ) -> heapless::Vec<LedChange, { 16 + 18 + 16 + 18 }> {
     // start at (start_x, start_y) + (0,0) for b
     let letter_b = write_b(start_x, start_y, WHITE);
@@ -17,7 +17,7 @@ pub fn score_board(
     let letter_w = write_b(start_x, start_y + 5, WHITE);
     // start at (start_x, start_y) + (6,5) for score blocks
     let white_score_indicator =
-        write_number_in_colors(start_x + 6, start_y + 5, black_score, 3, RED, BLUE, GREEN);
+        write_number_in_colors(start_x + 6, start_y + 5, white_score, 3, RED, BLUE, GREEN);
     let mut vec = heapless::Vec::new();
     vec.extend(letter_b);
     vec.extend(black_score_indicator);
