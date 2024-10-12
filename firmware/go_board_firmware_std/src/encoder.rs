@@ -6,7 +6,7 @@ use tokio::sync::broadcast::Sender;
 use tokio::sync::Notify;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
-enum SpinDirection {
+pub enum SpinDirection {
     CounterClockwise,
     Clockwise,
 }
@@ -31,12 +31,12 @@ pub struct RotaryEncoderState<'a> {
 
 impl<'a> RotaryEncoderState<'a> {
     pub fn init(
-        rotary_encoder_btn_pin: AnyIOPin,
-        rotary_encoder_clk_pin: AnyInputPin,
-        rotary_encoder_dt_pin: AnyInputPin,
+        rotary_encoder_btn: AnyIOPin,
+        rotary_encoder_clk: AnyInputPin,
+        rotary_encoder_dt: AnyInputPin,
     ) -> Result<Self> {
         let (button_notify, button) = {
-            let mut button = PinDriver::input(rotary_encoder_btn_pin)?;
+            let mut button = PinDriver::input(rotary_encoder_btn)?;
             button.set_pull(Pull::Up)?;
             button.set_interrupt_type(InterruptType::PosEdge)?;
             let notify = Arc::new(Notify::new());
@@ -51,10 +51,10 @@ impl<'a> RotaryEncoderState<'a> {
         };
 
         let (clk, clk_notify, dt) = {
-            let mut clk = PinDriver::input(rotary_encoder_clk_pin)?;
+            let mut clk = PinDriver::input(rotary_encoder_clk)?;
             clk.set_interrupt_type(InterruptType::PosEdge)?;
 
-            let dt = PinDriver::input(rotary_encoder_dt_pin)?;
+            let dt = PinDriver::input(rotary_encoder_dt)?;
 
             let clk_notify = Arc::new(Notify::new());
             let notifier = clk_notify.clone();
@@ -95,7 +95,7 @@ impl<'a> RotaryEncoderState<'a> {
                 counter -= 1;
             }
             println!("counter: {}, direction: {}", counter, current_direction);
-            on_change.send((counter, current_direction)).await?;
+            on_change.send((counter, current_direction))?;
         }
         Ok(())
     }

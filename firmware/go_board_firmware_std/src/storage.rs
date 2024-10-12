@@ -24,9 +24,9 @@ impl NvsNamespace {
         read_only: bool,
     ) -> Result<Self> {
         EspNvs::new(partition, namespace, !read_only)
-            .map_err(|e| anyhow!(e).context(format!("Could't get namespace {namespace}")))
+            .map_err(|e| anyhow!(e).context(format!("Couldn't get namespace {namespace}")))
             .map(|nvs| {
-                info!("Got namespace {namespace} from default partition");
+                debug!("Got namespace {namespace} from default partition");
                 NvsNamespace {
                     name: namespace,
                     nvs,
@@ -116,3 +116,4 @@ pub trait SaveInNvs: Sized + Serialize + DeserializeOwned + Debug + Clone + MaxS
         nvs.set_struct::<Self>(Self::key(), self, struct_buffer.as_mut())
     }
 }
+

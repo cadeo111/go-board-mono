@@ -16,28 +16,80 @@ import {
 } from "@/components/ui/alert-dialog.tsx";
 import {Button} from "@/components/ui/button.tsx";
 import {useEffect} from "preact/compat";
+import {generateMaskedPassword, I_GenericResponse} from "@/lib/utils.ts";
 
-interface WifiCredentialsCardParams {
-    onSaveWifiCredentials: (creds: { ssid: string; password: string }) => void;
-    hiddenPassword: string | null;
-    initialSSID: string | null;
-    connected: boolean;
-    loading:boolean;
+
+interface I_WifiStatus {
+    connected: boolean,
+    ssid: string,
+    first_letter_of_password: string,
+    length_of_password: number,
 }
 
 
+export const WifiCredentialsCard = () => {
+    const getWifiInfo = async (): Promise<I_WifiStatus | null> => {
+        setLoading(true)
+        let response = await fetch("wifi-status")
+        console.log("HELLO FROM STATUS", response)
+        let responseJson = await response.json() as I_GenericResponse<I_WifiStatus, any>;
 
-export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, initialSSID, connected, loading}: WifiCredentialsCardParams,
-) => {
-    let [ssid, setWifiSSID] = useState<null|string>();
-
-    useEffect(() => {
-        if(ssid == null){
-            setWifiSSID(initialSSID)
+        setLoading(false)
+        if (responseJson.is_ok) {
+            return responseJson.value
+        } else {
+            alert(`ERROR UPDATING WIFI CREDS see console`)
+            console.error("ERROR JSON", responseJson.value)
+            return null;
         }
-    }, [initialSSID]);
+
+    }
+
+
+    let [loading, setLoading] = useState(false);
+    const saveWifiCredentials = async (ssid: string, password: string) => {
+        setLoading(true);
+
+        const response = await fetch("/save-wifi-credentials", {
+            method: "POST",
+            body: JSON.stringify({ssid, password}),
+        });
+        if (!response.ok) {
+            // TODO: better request error handling (Popup?)
+            alert("ERROR UPDATING WIFI CREDS REQ")
+            return
+        }
+    }
+
+
+    // let [ssid, setWifiSSID] = useState<null|string>();
+
+    // useEffect(() => {
+    //     if(ssid == null){
+    //         setWifiSSID(initialSSID)
+    //     }
+    // }, [initialSSID]);
 
     let [password, setWifiPassword] = useState("");
+    let [hiddenPassword, setHiddenPassword] = useState("Wifi password");
+    let [ssid, setSsid] = useState("")
+    let [connected, setConnected] = useState(false)
+
+    useEffect(() => {
+        getWifiInfo().then((info) => {
+            console.log("GOT WIFI STATUS", info)
+            if (info?.ssid != undefined) {
+                setSsid(info!.ssid);
+            }
+            if (info?.connected != undefined) {
+                setConnected(info!.connected)
+            }
+            const possibleHiddenPassword = generateMaskedPassword(info?.first_letter_of_password ?? null, info?.length_of_password ?? null)
+            if (possibleHiddenPassword != null) {
+                setHiddenPassword(possibleHiddenPassword)
+            }
+        })
+    }, [])
 
 
     return <SettingsCard
@@ -62,17 +114,17 @@ export const WifiCredentialsCard = ({onSaveWifiCredentials, hiddenPassword, init
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => onSaveWifiCredentials({ssid:ssid??"", password})}>Save & Restart</AlertDialogAction>
+                    <AlertDialogAction onClick={() => saveWifiCredentials(ssid, password)}>Save & Restart</AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>}>
         <Label>Network Name (SSID)</Label>
-        <Input placeholder="Wifi SSID" value={ssid ?? ""}
+        <Input placeholder="Wifi SSID" value={ssid}
                onChange={(event) => {
-            setWifiSSID((event.currentTarget as HTMLInputElement).value)
-        }}/>
+                   setSsid((event.currentTarget as HTMLInputElement).value)
+               }}/>
         <Label>Password</Label>
-        <PasswordInput placeholder={hiddenPassword ?? "Wifi password"} setValue={setWifiPassword}/>
+        <PasswordInput placeholder={hiddenPassword} setValue={setWifiPassword}/>
     </SettingsCard>
 
 

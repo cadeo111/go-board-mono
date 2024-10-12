@@ -10,11 +10,11 @@ use esp_idf_svc::hal::modem;
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvsPartition, NvsDefault};
-use esp_idf_svc::sys::EspError;
+use esp_idf_svc::sys::{esp_netif_sntp_sync_wait, EspError};
 use esp_idf_svc::timer::{EspTaskTimerService, EspTimerService, Task};
 use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi, WifiDriver};
 use esp_idf_svc::{
-    sys, wifi,
+    sntp, sys, wifi,
     wifi::{ClientConfiguration as WifiClientConfiguration, Configuration as WifiConfiguration},
 };
 use log::{info, warn};
@@ -38,7 +38,7 @@ impl WifiState {
     }
 }
 
-pub struct WifiConnection<'a> {
+/*pub struct WifiConnection<'a> {
     pub state: Arc<WifiState>,
     wifi: AsyncWifi<EspWifi<'a>>,
 }
@@ -159,6 +159,8 @@ impl<'a> WifiConnection<'a> {
         }
     }
 }
+*/
+
 
 pub struct WifiLoop<'a> {
     wifi: AsyncWifi<EspWifi<'a>>,
@@ -215,7 +217,7 @@ impl<'a> WifiLoop<'a> {
     async fn do_connect_loop(
         &mut self,
         exit_after_first_connect: bool,
-    ) -> anyhow::Result<(), EspError> {
+    ) -> Result<(), EspError> {
         let wifi = &mut self.wifi;
         loop {
             // Wait for disconnect before trying to connect again.  This loop ensures
@@ -233,6 +235,19 @@ impl<'a> WifiLoop<'a> {
                 .await?;
 
             if exit_after_first_connect {
+                // // Keep it around or else the SNTP service will stop
+                // let _sntp = sntp::EspSntp::new(&sntp::SntpConf {
+                //     ..sntp::SntpConf::default()
+                // });
+                // let sntp_notifier = Arc::new(tokio::sync::Notify::new());
+                // let sntp_notifier_local = sntp_notifier.clone();
+                // 
+                // sntp::EspSntp::new_with_callback(&sntp::SntpConf::default(), move |_duration:Duration| {
+                //     // IDK what duration is, its a Duration, so i don't think its the time? maybe how long it took?
+                //     sntp_notifier_local.notify_one()
+                // })?;
+                // sntp_notifier.notified().await;
+                // info!("SNTP initialized");
                 return Ok(());
             }
         }
@@ -254,7 +269,7 @@ impl SaveInNvs for WifiCredentials {
     }
 
     fn get_struct_buffer<'a>() -> impl AsMut<[u8]> {
-        [0;Self::POSTCARD_MAX_SIZE]
+        [0; Self::POSTCARD_MAX_SIZE]
     }
 }
 

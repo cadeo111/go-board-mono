@@ -3,9 +3,7 @@ import {GoOnlineCredentialsCard} from "@/components/custom/GoOnlineCredentialsCa
 
 
 import {ComponentChild} from "preact";
-import {useState} from "preact/hooks";
-import {useEffect} from "preact/compat";
-import {generateMaskedPassword, I_GenericResponse} from "@/lib/utils.ts";
+
 
 const StyleWrapper = ({children}: { children: ComponentChild }) => {
     return <div className="flex min-h-screen w-full flex-col">
@@ -28,26 +26,7 @@ const StyleWrapper = ({children}: { children: ComponentChild }) => {
 // TODO: rename all interfaces as I_*
 
 
-interface I_WifiStatus {
-    connected: boolean,
-    ssid: string,
-    first_letter_of_password: string,
-    length_of_password: number,
-}
 
-const getWifiInfo = async (): Promise<I_WifiStatus | null> => {
-    let response = await fetch("/wifi-status")
-
-    let responseJson = await response.json() as I_GenericResponse<I_WifiStatus, any>;
-    if (responseJson.is_ok) {
-        return responseJson.value
-    } else {
-        alert(`ERROR UPDATING WIFI CREDS see console`)
-        console.error(responseJson.value)
-        return null;
-    }
-
-}
 
 
 export function App() {
@@ -55,39 +34,12 @@ export function App() {
     // example query string => /?w_id=randomssid&w_pfc=s&w_pn=6&og_un=cade&og_pfc=R&og_pn=20&w_c=c
 
 
-    const [wifiStatus, setWifiStatus] = useState<null | I_WifiStatus>(null);
-    useEffect(() => {
-        getWifiInfo().then((info) => {
-            setWifiStatus(info)
-        })
-    }, [])
-    let [isWifiLoading, setWifiLoading] = useState(false);
-    const saveWifiCredentials = async (ssid: string, password: string) => {
-        setWifiLoading(true);
 
-        const response = await fetch("/save-wifi-credentials", {
-            method: "POST",
-            body: JSON.stringify({ssid, password}),
-        });
-        if (!response.ok) {
-            // TODO: better request error handling (Popup?)
-            alert("ERROR UPDATING WIFI CREDS REQ")
-            return
-        }
-    }
 
 
     return (
         <StyleWrapper>
-            <WifiCredentialsCard
-                initialSSID={wifiStatus?.ssid ?? null}
-                hiddenPassword={generateMaskedPassword(wifiStatus?.first_letter_of_password ?? null, wifiStatus?.length_of_password ?? null)}
-                onSaveWifiCredentials={async ({ssid, password}) => {
-                    await saveWifiCredentials(ssid, password)
-                }}
-                loading={isWifiLoading}
-                connected={wifiStatus?.connected ?? false}/>
-
+            <WifiCredentialsCard/>
             <GoOnlineCredentialsCard/>
 
 

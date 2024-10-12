@@ -14,8 +14,9 @@ use esp_idf_svc::hal::reset;
 use esp_idf_svc::http::server::EspHttpConnection;
 use esp_idf_svc::io::Write;
 use esp_idf_svc::nvs::{EspNvsPartition, NvsDefault};
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -101,7 +102,7 @@ impl CaptiveServerHandler<HandlerRoute> for WifiStatus {
     }
 
     fn create_handler(
-        (status): Self::RequestExtraParameters,
+        status: Self::RequestExtraParameters,
     ) -> impl for<'r> Fn(&mut Request<&mut EspHttpConnection<'r>>) -> Result<DataResponse> + Send + 'static
     {
         move |_| Ok(DataResponse::Ok(Some(serde_json::to_value(&status)?)))
@@ -132,6 +133,67 @@ impl OnlineGoAccountStatus {
     }
 }
 
+/// taken from https://www.reddit.com/r/rust/comments/uwngcd/comment/i9sj3pu/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
+fn update_with(dest: &mut serde_json::Value, src: &serde_json::Value) {
+    use serde_json::Value::{Null, Object};
+
+    match (dest, src) {
+        (&mut Object(ref mut map_dest), &Object(ref map_src)) => {
+            // map_dest and map_src both are Map<String, Value>
+            for (key, value) in map_src {
+                // if key is not in map_dest, create a Null object
+                // then only, update the value
+                *map_dest.entry(key.clone()).or_insert(Null) = value.clone();
+            }
+        }
+        (_, _) => panic!("update_with only works with two serde_json::Value::Object s"),
+    }
+}
+
+fn get_online_go_account_status(saved_info: Option<OnlineGoLoginInfo>) -> Result<DataResponse> {
+    match saved_info {
+        Some(saved_info) => {
+            let mut res_data =
+                OnlineGoAccountStatus::new(true, &saved_info.username, &saved_info.password);
+            match saved_info.auth_with_password()? {
+                Ok(_) => Ok(DataResponse::Ok(Some(serde_json::to_value(&res_data)?))),
+                Err(err) => {
+                    error!("Failed to login to online-go, ERROR:{err}");
+                    res_data.authorized = false;
+                    let mut val = serde_json::to_value(&res_data)?;
+                    update_with(&mut val, &serde_json::to_value(&err)?);
+                    /*
+                    {
+                        // ok_val
+                        pub authorized: false,
+                        pub username: String,
+                        pub first_letter_of_password: String,
+                        pub length_of_password: u8,
+                        // err_val
+                         pub response: {
+                                            pub error: String, // will be empty string if all went well
+                                            pub error_description: String,
+                                       }
+                         pub status_code: StatusCode,
+
+                    }
+                    */
+                    Ok(DataResponse::HandledErr(
+                        // there are credentials but they are invalid
+                        StatusCode::UNAUTHORIZED,
+                        val,
+                    ))
+                }
+            }
+        }
+        None => Ok(DataResponse::HandledErr(
+            // basically there are no saved credentials
+            StatusCode::NETWORK_AUTHENTICATION_REQUIRED,
+            serde_json::to_value(&OnlineGoAccountStatus::default())?,
+        )),
+    }
+}
+
 impl CaptiveServerHandler<HandlerRoute> for OnlineGoAccountStatus {
     type RequestExtraParameters = (EspNvsPartition<NvsDefault>);
 
@@ -147,28 +209,9 @@ impl CaptiveServerHandler<HandlerRoute> for OnlineGoAccountStatus {
         nvs: Self::RequestExtraParameters,
     ) -> impl for<'r> Fn(&mut Request<&mut EspHttpConnection<'r>>) -> Result<DataResponse> + Send + 'static
     {
-        move |request| {
+        move |_| {
             let saved_info = OnlineGoLoginInfo::get_saved_in_nvs(nvs.clone())?;
-            match saved_info {
-                Some(saved_info) => match saved_info.auth_with_password()? {
-                    Ok(_) => {
-                        let res_data = OnlineGoAccountStatus::new(
-                            true,
-                            &saved_info.username,
-                            &saved_info.password,
-                        );
-                        Ok(DataResponse::Ok(Some(serde_json::to_value(&res_data)?)))
-                    }
-                    Err(err) => Ok(DataResponse::HandledErr(
-                        StatusCode::UNAUTHORIZED,
-                        serde_json::to_value(&err)?,
-                    )),
-                },
-                None => Ok(DataResponse::HandledErr(
-                    StatusCode::UNAUTHORIZED,
-                    serde_json::to_value(&OnlineGoAccountStatus::default())?,
-                )),
-            }
+            get_online_go_account_status(saved_info)
         }
     }
 }
@@ -177,7 +220,7 @@ impl CaptiveServerHandler<HandlerRoute> for OnlineGoLoginInfo {
     type RequestExtraParameters = (EspNvsPartition<NvsDefault>);
 
     fn method() -> Method {
-        Method::Get
+        Method::Post
     }
 
     fn url() -> HandlerRoute {
@@ -195,7 +238,8 @@ impl CaptiveServerHandler<HandlerRoute> for OnlineGoLoginInfo {
                 DataResponseOrValue::Value(login_info) => {
                     login_info.set_saved_in_nvs(partition.clone())?;
                     info!("Saved new online-go login info {login_info:?}, checking status...");
-                    Ok(DataResponse::Ok(None))
+
+                    return get_online_go_account_status(Some(login_info));
                 }
             }
         }
@@ -217,13 +261,13 @@ impl CaptiveServerHandler<HandlerRoute> for OnlineGoGamesList {
 
     /// sends [GameList]
     /// ------------------------------------------------------------------------------------------
-    /// 
+    ///
     /// #### Get a list of games
-    /// 
+    ///
     ///      get the list of games for the user credentials currently saved
-    /// 
+    ///
     /// ##### Responses
-    /// 
+    ///
     /// > | http code     | content-type                      | response                                                            |
     /// > |---------------|-----------------------------------|---------------------------------------------------------------------|
     /// > | `200`         | `application/json;charset=UTF-8`  | {is_ok:true, value:[GameList]}                                      |

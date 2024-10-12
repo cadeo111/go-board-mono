@@ -308,7 +308,7 @@ impl BoardState {
             .iter()
             .enumerate()
             .map(|(x, v)| (x, v.iter().enumerate()))
-            .flat_map(|(x, iter)| iter.map(move |(y, v)| (x, y, v)))
+            .flat_map(|(x, iter)| iter.map(move |(y, v)| (x as u8, y as u8, v)))
     }
 }
 

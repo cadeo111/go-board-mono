@@ -1,3 +1,5 @@
+#![feature(never_type)] // allows for signifying functions never return, this is already used by esprs
+
 use std::iter::{Enumerate, FlatMap, Map};
 use std::num::NonZeroU32;
 use std::slice::Iter;
@@ -14,6 +16,8 @@ use crate::onlinego::api::{
     Player,
 };
 use crate::onlinego::auth_token::AuthToken;
+use crate::restart_recovery::{restart_with_recover_option, RecoverOption};
+use crate::setup::setup;
 use crate::storage::SaveInNvs;
 use crate::wifi::{WifiCredentials, WifiLoop};
 use anyhow::anyhow;
@@ -45,7 +49,9 @@ use tokio::{join, select};
 mod encoder;
 mod neopixel;
 mod onlinego;
+mod restart_recovery;
 mod settings;
+mod setup;
 mod storage;
 mod wifi;
 
@@ -60,73 +66,12 @@ const TCP_LISTENING_PORT: u16 = 12345;
 // esp_app_desc!();
 
 fn main() -> Result<()> {
-    // It is necessary to call this function once. Otherwise, some patches to the runtime
-    // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
-    sys::link_patches();
-
-    // Bind the log crate to the ESP Logging facilities
-    esp_idf_svc::log::EspLogger::initialize_default();
-
-    // eventfd is needed by our mio poll implementation.  Note you should set max_fds
-    // higher if you have other code that may need eventfd.
-    info!("Setting up eventfd...");
-    let config = sys::esp_vfs_eventfd_config_t {
-        max_fds: 1,
-        ..Default::default()
-    };
-
-    {
-        esp! { unsafe { sys::esp_vfs_eventfd_register(&config) } }
-    }?;
-
-    info!("Setting up board...");
-
-    let peripherals = Peripherals::take().unwrap();
-    let sysloop = EspSystemEventLoop::take()?;
-    let timer = EspTaskTimerService::new()?;
-    let nvs = EspDefaultNvsPartition::take()?;
-
-    let wifi_creds = WifiCredentials::get_saved_in_nvs_with_default(
-        nvs.clone(),
-        WifiCredentials::get_from_env()?,
-    )?;
-
-    // GPIOS
-    let board_leds = peripherals.pins.gpio3;
-    let channel0 = peripherals.rmt.channel0;
-    let rotary_encoder_btn_pin = peripherals.pins.gpio4;
-    let rotary_encoder_clk_pin = peripherals.pins.gpio5;
-    let rotary_encoder_dt_pin = peripherals.pins.gpio6;
-
-    info!("Initializing rotary encoder...");
-
-    let rotary_encoder = RotaryEncoderState::init(
-        rotary_encoder_btn_pin.into(),
-        rotary_encoder_clk_pin.into(),
-        rotary_encoder_dt_pin.into(),
-    )?;
-
-    info!("checking if should boot into settings mode...");
-    let re_button_pressed = rotary_encoder.is_button_pressed();
-    if (re_button_pressed) {
-        info!("going into settings mode");
-        settings::runner::run(nvs, peripherals.modem, sysloop.clone(), &wifi_creds)
-            .map_err(|e| anyhow!(e))?;
-        error!("[ERROR] exited settings without error, this should not happen...");
-        return Ok(());
-    } else {
-        info!("going into game-play mode");
-    }
-
-    info!("Initializing Wi-Fi...");
-    let wifi = AsyncWifi::wrap(
-        EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs.clone()))?,
-        sysloop,
-        timer.clone(),
-    )?;
-
-    let (tx, rx) = mpsc::channel::<LedChange>(CHANNEL_SIZE);
-    let (tx_ei, rx_ei) = broadcast::channel::<EncoderInfo>(100);
+    let (
+        (wifi_creds, wifi),
+        (rotary_encoder_state, encoder_info_tx, encoder_info_rx),
+        (led_change_rx, led_change_tx, board_led_grid_pin, rmt_channel0),
+        nvs,
+    ) = setup()?;
 
     info!("Starting async run loop");
     tokio::runtime::Builder::new_current_thread()
@@ -135,19 +80,27 @@ fn main() -> Result<()> {
         .block_on(async move {
             let mut wifi_loop = WifiLoop::new(wifi);
             wifi_loop.configure(&wifi_creds).await?;
-            wifi_loop.initial_connect().await?;
+            let wifi_connect_result = wifi_loop.initial_connect().await;
             //TODO: restart to settings if wifi doesn't connect
+            if let Err(error) = wifi_connect_result {
+                error!("Failed to start async wifi: {error}");
+                // this will exit the program and force the settings panel
+                restart_with_recover_option(RecoverOption::ForceSettingsPanel, nvs.clone())?;
+            }
 
             // check online-go authorization
             let login_info = match OnlineGoLoginInfo::get_saved_in_nvs(nvs.clone())? {
-                None => todo!("Restart in settings mode"),
+                None => {
+                    error!("failed to get online go login info! restarting... ");
+                    restart_with_recover_option(RecoverOption::ForceSettingsPanel, nvs.clone())?;
+                },
                 Some(tok) => tok,
             };
             let OauthResponseValid { access_token, .. } = match login_info.auth_with_password()? {
                 Ok(token) => token,
                 Err(err) => {
-                    error!("{:?}", err);
-                    todo!("Restart in settings mode");
+                    error!("Failed to log in to online-go: {:?} \n restarting...", err);
+                    restart_with_recover_option(RecoverOption::ForceSettingsPanel, nvs.clone())?;
                 }
             };
             // todo: handle getting new token when first expires
@@ -155,15 +108,16 @@ fn main() -> Result<()> {
 
             // Check for current
 
-            let rx_ei = tx_ei.subscribe();
             info!("Preparing to launch rotary encoder monitor...");
             let mut rc = tokio::spawn(async {
-                let mut rotary_encoder = rotary_encoder;
-                rotary_encoder.monitor_encoder_spin(tx_ei).await
+                let mut rotary_encoder = rotary_encoder_state;
+                rotary_encoder.monitor_encoder_spin(encoder_info_tx).await
             });
             info!("Preparing to launch led blinker...");
             let mut led = tokio::spawn(led_ctrl::<{ BOARD_SIZE * BOARD_SIZE }, { BOARD_SIZE }>(
-                board_leds, channel0, rx,
+                board_led_grid_pin,
+                rmt_channel0,
+                led_change_rx,
             ));
             // info!("Preparing to launch echo settings...");
             // tokio::spawn(echo_server(tx.clone()));
@@ -171,7 +125,11 @@ fn main() -> Result<()> {
             info!("Entering main Wi-Fi run loop...");
             let mut wifi = tokio::spawn(wifi_loop.stay_connected());
             info!("starting main loop");
-            let mut main_loop = tokio::spawn(main_loop(tx.clone(), rx_ei, auth_token));
+            let mut main_loop = tokio::spawn(main_loop(
+                led_change_tx.clone(),
+                encoder_info_rx,
+                auth_token,
+            ));
 
             return select! {
                 result = &mut rc =>{
@@ -228,8 +186,8 @@ async fn main_loop(
     // is the game complete?
     if (current_game.is_game_over()
         //TODO: Remove this after testing
-        || true
-    ) {
+        || true)
+    {
         let gameboard_changes: Vec<LedChange> = game_board_data
             .board_iter()
             .map(|(x, y, v)| {
@@ -271,7 +229,8 @@ async fn main_loop(
             }
             show_board = !show_board;
         }
-    } else {}
+    } else {
+    }
     Ok(())
 }
 

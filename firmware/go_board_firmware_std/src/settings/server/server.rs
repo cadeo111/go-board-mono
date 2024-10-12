@@ -175,7 +175,7 @@ impl DataResponse {
             ),
             DataResponse::Ok(value) => (
                 json!({
-                        "is_ok":false,
+                        "is_ok":true,
                         "value":value
                     }
                 ),

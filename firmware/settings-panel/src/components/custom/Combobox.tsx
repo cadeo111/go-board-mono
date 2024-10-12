@@ -45,7 +45,7 @@ export function Combobox<T>({options, placeholderSearch, placeholderSelect}: Com
                             {options.map((option) => (
                                 <CommandItem
                                     key={option.value}
-                                    value={option.label}
+                                    value={option.label as string}
                                     onSelect={() => {
                                         setValue(option.value === value ? null : option.value)
                                         setOpen(false)
